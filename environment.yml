@@ -1,0 +1,129 @@
+name: pytorch
+channels:
+  - fastchan
+  - conda-forge
+  - pytorch
+  - defaults
+dependencies:
+  - _libgcc_mutex
+  - backcall
+  - blas
+  - ca-certificates
+  - certifi
+  - cffi
+  - cudatoolkit
+  - decorator
+  - freetype
+  - intel-openmp
+  - ipykernel
+  - ipython
+  - ipython_genutils
+  - jedi
+  - jpeg
+  - jupyter_client
+  - jupyter_core
+  # - libedit
+  - libffi
+  # - libgcc-ng
+  # - libgfortran-ng
+  - libpng
+  - libsodium
+  # - libstdcxx-ng
+  - libtiff
+  - mkl
+  - mkl_fft
+  - mkl_random
+  # - ncurses
+  - ninja
+  - numpy=1.16.4
+  - numpy-base
+  - olefile
+  - openssl
+  - pandas
+  - parso
+  - pexpect
+  - pickleshare
+  - pip
+  - prompt_toolkit
+  - ptyprocess
+  - pycparser
+  - pygments
+  - python=3.6.2
+  - python-dateutil
+  - python-graphviz
+  # Change on linux
+  # - pytorch=1.3.1=py3.6_cuda10.1.243_cudnn7.6.3_0
+  - pytorch=1.3.1=py3.6_cuda101_cudnn7_0
+  - pytz
+  - pyzmq
+  # - readline
+  - setuptools
+  - six
+  - sqlite
+  - tk
+  - torchvision=0.4.2
+  - tornado
+  - traitlets
+  - tqdm
+  - wcwidth
+  - wheel
+  - xz
+  - zeromq
+  - zlib
+  - zstd
+  - absl-py
+  - cachetools
+  - chardet
+  - cycler
+  - cython
+  - dominate
+  - easydict
+  - efficientnet-pytorch
+  - filelock
+  - gdown
+  - google-auth
+  - google-auth-oauthlib
+  - grpcio
+  - idna
+  - joblib
+  - jsonpatch
+  - jsonpointer
+  - kiwisolver
+  - kornia
+  - lmdb
+  - markdown
+  - matplotlib
+  - mpmath
+  - oauthlib
+  # - opencv-python
+  - pycuda
+  - py-opencv
+  - pillow
+  - protobuf
+  - pyasn1
+  - pyasn1-modules
+  - pyparsing
+  - pysocks
+  - pyyaml
+  - requests
+  - requests-oauthlib
+  - rsa
+  - scikit-learn
+  - scipy=1.1.0
+  - sympy
+  - tabulate
+  - tensorboard
+  - tensorboardx
+  - torchfile
+  - urllib3
+  - visdom
+  - websocket-client
+  - werkzeug
+  - pip:
+    - pycocotools
+    - sklearn
+    - thop==0.0.31.post1912272122
+    - torchcontrib
+    - yml
+# prefix: /home/yf22/anaconda3/envs/pytorch
+
