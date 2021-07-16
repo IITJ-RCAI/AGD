@@ -1,3 +1,7 @@
 .venv
 .micromamba
-**/__pycache__/**
+**/__pycache__/
+**/ckpt/
+dataset
+AGD_SR/search/ESRGAN/
+.vscode
