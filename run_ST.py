@@ -16,11 +16,7 @@ if ni:
 
 # prepare dataset
 print(f'Preparing datasets...')
-<<<<<<< HEAD
 os.system(f'python dataset_ST.py')
-=======
-os.system(f'python dataset.py')
->>>>>>> 5d3325bf6e269257683ba305f2e5241c6b37d00c
 print(f'Done')
 
 task_st = pathlib.Path('./AGD_ST')
