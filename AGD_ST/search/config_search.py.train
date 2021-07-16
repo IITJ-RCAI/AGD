@@ -32,7 +32,6 @@ C.val_log_file = C.log_dir + '/val_' + exp_time + '.log'
 C.link_val_log_file = C.log_dir + '/val_last.log'
 
 """Data Dir and Weight Dir"""
-
 C.dataset = 'horse2zebra'
 
 if C.dataset == 'horse2zebra':
@@ -73,62 +72,95 @@ C.bn_momentum = 0.1
 
 """Train Config"""
 
-
-# C.lr = 0.0001
-# C.lr_decay = 1
-
-C.opt = 'Sgd'
+C.opt = 'Adam'
 
 C.momentum = 0.5
-C.weight_decay = 5e-4
+C.weight_decay = 1e-3
 
 C.betas=(0.5, 0.999)
 C.num_workers = 4
-
 
 """ Search Config """
 C.grad_clip = 5
 
 C.layers = 9
 
+# C.pretrain = True
+C.pretrain = 'ckpt/pretrain'
+########################################
+C.prun_modes = 'arch_ratio'
+
 C.width_mult_list = [4./12, 6./12, 8./12, 10./12, 1.]
 
 C.width_mult_list_sh = [4/12, 6./12, 8./12, 10./12, 1.]
 
-C.pretrain = False
-# C.pretrain = 'ckpt/pretrain'
+
+if C.pretrain == True:
+    C.batch_size = 2
+    C.niters_per_epoch = C.num_train_imgs // 2 // C.batch_size
+    C.latency_weight = [0, 0]
+    C.image_height = 256 # this size is after down_sampling
+    C.image_width = 256
+    C.save = "pretrain"
+
+    C.nepochs = 50
+    C.eval_epoch = 10
+
+    C.lr_schedule = 'linear'
+    C.lr = 1e-3
+    # linear 
+    C.decay_epoch = 10
+    # exponential
+    C.lr_decay = 0.97
+    # multistep
+    C.milestones = [50, 100, 200]
+    C.gamma = 0.1
+
+
+else:
+    C.batch_size = 2
+    C.niters_per_epoch = C.num_train_imgs // 2 // C.batch_size
+    C.latency_weight = [0, 1e-2,]
+    C.image_height = 256 # this size is after down_sampling
+    C.image_width = 256
+    C.save = "search"
+
+    C.nepochs = 50
+    C.eval_epoch = int(C.nepochs/20)
+
+    C.lr_schedule = 'linear'
+    C.lr = 1e-3
+    # linear 
+    C.decay_epoch = 10
+    # exponential
+    C.lr_decay = 0.97
+    # multistep
+    C.milestones = [50, 100, 200]
+    C.gamma = 0.1
+
+
 ########################################
-
-C.batch_size = 16
-C.niters_per_epoch = C.num_train_imgs // C.batch_size
-C.latency_weight = [0, 1e-2,]
-C.image_height = 256 # this size is after down_sampling
-C.image_width = 256
-
-C.save = "finetune"
-########################################
-
-C.nepochs = 400
-
-C.eval_epoch = 10
-
-C.lr_schedule = 'linear'
-C.lr = 1e-1
-# linear 
-C.decay_epoch = 100
-# exponential
-C.lr_decay = 0.97
-# multistep
-C.milestones = [50, 100, 200]
-C.gamma = 0.1
 
 C.quantize = False
 
+C.slimmable = True
+
+C.train_portion = 0.5
+
+C.unrolled = False
+
+C.arch_learning_rate = 3e-4
+
+C.alpha_weight = 1/4
+C.ratio_weight = 3/4
+C.beta_weight = 0
+C.flops_weight = 1e-17
+
+C.flops_max = 8e9
+
+C.flops_min = 3e9
+
 # C.loss_weight = [1, 1e5, 1, 5e-8]
-C.loss_weight = [1e-2, 1e5, 1, 0]
+C.loss_weight = [0, 1e5, 1, 0]
 
 C.generator_A2B = 'horse2zebra/netG_A2B_epoch_199.pth'
-
-C.load_path = 'ckpt/search'
-
-C.eval_only = False

@@ -35,23 +35,23 @@ C.link_val_log_file = C.log_dir + '/val_last.log'
 C.dataset = 'horse2zebra'
 
 if C.dataset == 'horse2zebra':
-    C.dataset_path = "/home/yf22/dataset/horse2zebra"
-    C.target_path = '/home/yf22/dataset/horse2zebra/target_train'
+    C.dataset_path = "./../../dataset/style_transfer/horse2zebra"
+    C.target_path = './../../dataset/style_transfer/horse2zebra/target_train'
     C.num_train_imgs = 1067
     C.num_eval_imgs = 120
 elif C.dataset == 'zebra2horse':
-    C.dataset_path = "/home/yf22/dataset/zebra2horse"
-    C.target_path = '/home/yf22/dataset/zebra2horse/target_train'
+    C.dataset_path = "./../../dataset/style_transfer/zebra2horse"
+    C.target_path = './../../dataset/style_transfer/zebra2horse/target_train'
     C.num_train_imgs = 1334
     C.num_eval_imgs = 140
 elif C.dataset == 'summer2winter':
-    C.dataset_path = "/home/yf22/dataset/summer2winter"
-    C.target_path = '/home/yf22/dataset/summer2winter/target_train'
+    C.dataset_path = "./../../dataset/style_transfer/summer2winter"
+    C.target_path = './../../dataset/style_transfer/summer2winter/target_train'
     C.num_train_imgs = 1231
     C.num_eval_imgs = 309
 elif C.dataset == 'winter2summer':
-    C.dataset_path = "/home/yf22/dataset/winter2summer"
-    C.target_path = '/home/yf22/dataset/winter2summer/target_train'
+    C.dataset_path = "./../../dataset/style_transfer/winter2summer"
+    C.target_path = './../../dataset/style_transfer/winter2summer/target_train'
     C.num_train_imgs = 962
     C.num_eval_imgs = 238
 else:
