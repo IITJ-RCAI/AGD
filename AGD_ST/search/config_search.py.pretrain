@@ -85,8 +85,8 @@ C.grad_clip = 5
 
 C.layers = 9
 
-# C.pretrain = True
-C.pretrain = 'ckpt/pretrain'
+C.pretrain = True
+# C.pretrain = 'ckpt/pretrain'
 ########################################
 C.prun_modes = 'arch_ratio'
 

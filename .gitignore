@@ -5,3 +5,6 @@
 dataset
 AGD_SR/search/ESRGAN/
 .vscode
+AGD_ST/search/output/*
+
+*.tar.gz

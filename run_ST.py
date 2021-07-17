@@ -6,6 +6,12 @@ def banner(msg):
     print(msg)
     print('='*20)
 
+def number_this_file(fl: pathlib.Path):
+    i = 0
+    while fl.exists():
+        i += 1
+        fl = (fl.parent / (fl.name+f'.{i}'))
+    return fl
 
 # get input for non-interactive
 ni = input(f'Is this a non-interactive run?[y/N]: ')
@@ -35,12 +41,18 @@ if pre_ckpt.exists():
 if not skip:
     print(f'Running pre-train...')
     os.system(f'cd AGD_ST/search && python train_search.py')
+    # compress checkpoint
+    tar_file = pathlib.Path('pretrain_ckpt.tar.gz')
+    if tar_file.exists():
+        nn = number_this_file(tar_file)
+        tar_file.rename(nn)
+    os.system(f'tar -czvf {str(tar_file)}  -C AGD_ST/search {str(pre_ckpt)}')
     print(f'Done')
 
 # run train_search
 banner('Train search')
 skip = False
-train_ckpt = task_st / 'search' / 'ckpt' / 'search'
+train_ckpt = ckpt / 'search'
 if not pre_ckpt.exists():
     print(f'Please pre-train before training.')
     exit()
@@ -62,6 +74,12 @@ if not skip:
     cfg_train = cfg_train.parent / 'config_search.py'
     try:
         os.system(f'cd AGD_ST/search && python train_search.py')
+        # compress checkpoint
+        tar_file = pathlib.Path('train_ckpt.tar.gz')
+        if tar_file.exists():
+            nn = number_this_file(tar_file)
+            tar_file.rename(nn)
+        os.system(f'tar -czvf {str(tar_file)}  -C AGD_ST/search {str(train_ckpt)}')
     finally:
         # Replace normal config files
         cfg_train.rename(cfg_train.parent / 'config_search.py.train')
@@ -81,6 +99,12 @@ if train_sc_ckpt.exists():
 if not skip:
     print(f'Running finetune...')
     os.system(f'cd AGD_ST/search && python train.py')
+    # compress checkpoint
+    tar_file = pathlib.Path('finetune_ckpt.tar.gz')
+    if tar_file.exists():
+        nn = number_this_file(tar_file)
+        tar_file.rename(nn)
+    os.system(f'tar -czvf {str(tar_file)}  -C AGD_ST/search {str(train_sc_ckpt)}')
     print(f'Done')
 
 # Eval
