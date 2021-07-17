@@ -16,6 +16,11 @@ def number_this_file(fl: pathlib.Path):
 # get input for non-interactive
 ni = input(f'Is this a non-interactive run?[y/N]: ')
 ni = True if ni=='y' or ni=='Y' else False
+if ni:
+    ni_str = input(f'Please provide y/n string for the next 3 runs [pretrain/train/finetune]: ')
+    if len(ni_str) != 3:
+        print(f'Invalid input.')
+        exit()
 
 if ni:
     banner(f'Running in Non-Interactive mode')
@@ -33,7 +38,7 @@ banner('Pre-train')
 pre_ckpt = ckpt / 'pretrain'
 skip = False
 if pre_ckpt.exists():
-    ip = input(f'Pre-train checkpoint exists. Want to overrite?[Y/n]: ') if not ni else 'y'
+    ip = input(f'Pre-train checkpoint exists. Want to overrite?[Y/n]: ') if not ni else ni_str[0]
     if ip == 'Y' or ip =='y' or ip == '':
         shutil.rmtree(pre_ckpt, ignore_errors=True)
     else:
@@ -57,7 +62,7 @@ if not pre_ckpt.exists():
     print(f'Please pre-train before training.')
     exit()
 if train_ckpt.exists():
-    ip = input(f'Train checkpoint exists. Want to overrite?[Y/n]: ') if not ni else 'y'
+    ip = input(f'Train checkpoint exists. Want to overrite?[Y/n]: ') if not ni else ni_str[1]
     if ip == 'Y' or ip =='y' or ip == '':
         shutil.rmtree(train_ckpt, ignore_errors=True)
     else:
@@ -91,7 +96,7 @@ banner(f'Train from scratch')
 train_sc_ckpt = ckpt / 'finetune'
 skip = False
 if train_sc_ckpt.exists():
-    ip = input(f'Finetune train checkpoint exists. Want to overrite?[Y/n]: ') if not ni else 'y'
+    ip = input(f'Finetune train checkpoint exists. Want to overrite?[Y/n]: ') if not ni else ni_str[2]
     if ip == 'Y' or ip =='y' or ip == '':
         shutil.rmtree(train_sc_ckpt, ignore_errors=True)
     else:
