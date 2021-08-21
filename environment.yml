@@ -125,5 +125,8 @@ dependencies:
     - thop==0.0.31.post1912272122
     - torchcontrib
     - yml
+    - httpimport
+    - gitpython
+    - addict
 # prefix: /home/yf22/anaconda3/envs/pytorch
 

@@ -2,6 +2,9 @@
 .micromamba
 **/__pycache__/
 **/ckpt/
+.ipynb_checkpoints
+.mypy_cache
+maestro
 dataset
 AGD_SR/search/ESRGAN/
 .vscode

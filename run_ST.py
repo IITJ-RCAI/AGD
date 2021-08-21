@@ -13,6 +13,12 @@ def number_this_file(fl: pathlib.Path):
         fl = (fl.parent / (fl.name+f'.{i}'))
     return fl
 
+# get metric config
+if input('Should run use maestro? [y/N]: ').lower() == 'y':
+    os.environ['USE_MAESTRO'] = '1'
+else:
+    os.environ['USE_MAESTRO'] = '0'
+
 # get input for non-interactive
 ni = input(f'Is this a non-interactive run?[y/N]: ')
 ni = True if ni=='y' or ni=='Y' else False

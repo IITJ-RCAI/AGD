@@ -3,9 +3,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from thop import profile
+from custom_metric import profile
 from thop.count_hooks import count_convNd
-import sys
+import sys, os
 import os.path as osp
 from easydict import EasyDict as edict
 from quantize import QConv2d, QuantMeasure, QConvTranspose2d
@@ -39,7 +39,7 @@ if osp.isfile(table_file_name):
     latency_lookup_table = np.load(table_file_name).item()
 
 flops_lookup_table = {}
-table_file_name = "flops_lookup_table.npy"
+table_file_name = "flops_lookup_table.npy" if os.environ['USE_MAESTRO']=='1' else "maestro_lookup_table.npy"
 if osp.isfile(table_file_name):
     flops_lookup_table = np.load(table_file_name, allow_pickle=True).item()
 
@@ -56,7 +56,6 @@ def count_custom(m, x, y):
     m.total_ops += 0
 
 custom_ops={QConv2d: count_convNd, QConvTranspose2d:count_convNd, QuantMeasure: count_custom, nn.InstanceNorm2d: count_custom}
-
 
 class Conv(nn.Module):
     '''
