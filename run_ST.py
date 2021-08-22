@@ -20,6 +20,9 @@ def number_this_file(fl: pathlib.Path):
     return fl
 
 
+# Select GPU
+os.environ["CUDA_VISIBLE_DEVICES"] = input("Select GPU by index[15]: ") or "15"
+
 # get metric config
 if input("Should run use maestro? [y/N]: ").lower() == "y":
     os.environ["USE_MAESTRO"] = "1"
@@ -27,7 +30,6 @@ else:
     os.environ["USE_MAESTRO"] = "0"
 
 # Set group name
-
 dG = f"AGD_Maestro ({datetime.now()})"
 os.environ["WANDB_GROUP"] = input(f"WanDB Group name[{dG}]: ") or dG
 
