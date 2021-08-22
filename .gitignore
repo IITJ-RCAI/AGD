@@ -2,12 +2,13 @@
 .micromamba
 **/__pycache__/
 **/ckpt/
-.ipynb_checkpoints
-.mypy_cache
+**/.ipynb_checkpoints
+**/.mypy_cache
+**/wandb/
 maestro
 dataset
 AGD_SR/search/ESRGAN/
 .vscode
 AGD_ST/search/output/*
 
-*.tar.gz
+*.tar.gz*

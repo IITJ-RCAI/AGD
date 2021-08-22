@@ -10,6 +10,7 @@ if os.environ["USE_MAESTRO"] == "1":
     import tempfile
     import git
     from addict import Dict
+    import importlib.util
 
     # import maestro code
     def get_maestro(clone_dir):
@@ -18,14 +19,13 @@ if os.environ["USE_MAESTRO"] == "1":
         # store paths
         ret.dir = clone_dir
         ret.path = pathlib.Path(clone_dir.name)
-        logging.info(f"Cloning maestro at: {ret.path}")
+        print(f"Cloning maestro at: {ret.path}")
         git.Git(ret.path).clone("git://github.com/maestro-project/maestro.git")
-        sys.path.append(ret.path)
         # import stuff
-        logging.info("Importing maestro code...")
-        from maestro.tools.frontend.helpers.torch_maestro_summary import summary
-
-        ret.summary = summary
+        print("Importing maestro code...")
+        ret.summary = importlib.util.spec_from_file_location(
+            "summary", ret.path / "maestro" / "tools" / "frontend" / "helpers" / "torch_maestro_summary.py",
+        )
         return ret
 
     maestro = get_maestro(tempfile.TemporaryDirectory())
