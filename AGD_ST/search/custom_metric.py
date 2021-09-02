@@ -33,7 +33,7 @@ if os.environ.get("USE_MAESTRO", "0") == "1":
     def make_model_file(layer, inputs, filename):
         mae_summary = maestro.summary(layer, inputs)
         with open(filename, "w") as fo:
-            fo.write("Network {} {{\n".format(model.__module__))
+            fo.write("Network {} {{\n".format(layer.__module__))
             for key, val in mae_summary.items():
                 pc = re.compile("^Conv")
                 pl = re.compile("^Linear")

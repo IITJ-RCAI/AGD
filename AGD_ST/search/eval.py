@@ -74,7 +74,7 @@ def main():
     config.stage = "eval"
     config.save = "ckpt/eval"
     # wandb run
-    wandb.init(
+    run = wandb.init(
         project="AGD_Maestro",
         name=f"{config.dataset}-{config.stage}-{'with' if config.USE_MAESTRO else 'without'}_maestro",
         tags=[config.dataset, "AGD", config.stage]
@@ -125,10 +125,13 @@ def main():
                 "FLOPs": flops,
             },
         )
-        logger.add_text("model_summary", str(summary(model, input_size=(1, 3, 256, 256))))
+        logger.add_text(
+            "model_summary", str(summary(model, input_size=(1, 3, 256, 256)))
+        )
         print("params = %fMB, FLOPs = %fGB" % (params / 1e6, flops / 1e9))
 
-    model = torch.nn.DataParallel(model).cuda()
+    # model = torch.nn.DataParallel(model).cuda()
+    model = model.cuda()
 
     if config.ckpt:
         state_dict = torch.load(config.ckpt)
@@ -146,12 +149,13 @@ def main():
     )
 
     with torch.no_grad():
-        valid_fid = infer(model, test_loader, logger)
+        valid_fid = infer(model, test_loader, logger, run)
         logger.add_scalar("fid", valid_fid)
         print("Eval Fid:", valid_fid)
+    logger.close()
 
 
-def infer(model, test_loader, logger):
+def infer(model, test_loader, logger, run):
     model.eval()
 
     if not config.real_measurement:
@@ -163,24 +167,27 @@ def infer(model, test_loader, logger):
     comp_table = wandb.Table(columns=["Real Image", "Generated Image"])
     once = False
     for i, batch in enumerate(test_loader):
-        if not(once is True):
-            once = True
-            logger.add_graph(model, batch["A"].cuda())
         # Set model input
         real_A = Variable(batch["A"]).cuda()
+        if not (once is True):
+            once = True
+            logger.add_graph(model, real_A)
         fake_B = 0.5 * (model(real_A).data + 1.0)
 
         if not config.real_measurement:
             comp_table.add_data(wandb.Image(real_A), wandb.Image(fake_B))
             save_image(fake_B, os.path.join(outdir, "%04d.png" % (i + 1)))
-    wandb.log(
+    run.log(
         {
-            "Eval. Images": comp_table,
+            "Eval._Images": comp_table,
         }
     )
     if not config.real_measurement:
         fid = compute_fid(outdir, config.dataset_path + "/test/B")
-        os.rename(outdir, outdir + "_%.3f" % (fid))
+        try:
+            os.rename(outdir, outdir + "_%.3f" % (fid))
+        except:
+            pass
     else:
         fid = 0
 
