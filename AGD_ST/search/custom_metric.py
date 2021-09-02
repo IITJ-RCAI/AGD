@@ -1,7 +1,7 @@
 # Custom profile override
 import os
 
-if os.environ["USE_MAESTRO"] == "1":
+if os.environ.get("USE_MAESTRO", "0") == "1":
     import logging
     import pathlib
     import re
