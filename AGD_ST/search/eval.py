@@ -52,6 +52,7 @@ from thop.count_hooks import count_convNd
 import wandb
 from datetime import datetime
 from matplotlib import pyplot as plt
+from torchinfo import summary
 
 
 def count_custom(m, x, y):
@@ -71,6 +72,7 @@ def main():
     config.USE_MAESTRO = os.environ.get("USE_MAESTRO", "0") == "1"
     config.TEST_RUN = os.environ.get("TEST_RUN", "0") == "1"
     config.stage = "eval"
+    config.save = "ckpt/eval"
     # wandb run
     wandb.init(
         project="AGD_Maestro",
@@ -86,6 +88,8 @@ def main():
         mode="disabled" if config.TEST_RUN else "online",
         config=config,
     )
+    # Create logger
+    logger = SummaryWriter(config.save)
     # preparation ################
     torch.backends.cudnn.enabled = True
     torch.backends.cudnn.benchmark = True
@@ -114,12 +118,14 @@ def main():
             model, inputs=(torch.randn(1, 3, 256, 256),), custom_ops=custom_ops
         )
         flops = model.forward_flops(size=(3, 256, 256))
-        wandb.log(
+        logger.add_scalars(
+            "",
             {
                 "params": params,
                 "FLOPs": flops,
-            }
+            },
         )
+        logger.add_text("model_summary", str(summary(model, input_size=(1, 3, 256, 256))))
         print("params = %fMB, FLOPs = %fGB" % (params / 1e6, flops / 1e9))
 
     model = torch.nn.DataParallel(model).cuda()
@@ -140,16 +146,12 @@ def main():
     )
 
     with torch.no_grad():
-        valid_fid = infer(model, test_loader)
-        wandb.log(
-            {
-                "fid": valid_fid,
-            }
-        )
+        valid_fid = infer(model, test_loader, logger)
+        logger.add_scalar("fid", valid_fid)
         print("Eval Fid:", valid_fid)
 
 
-def infer(model, test_loader):
+def infer(model, test_loader, logger):
     model.eval()
 
     if not config.real_measurement:
@@ -159,13 +161,17 @@ def infer(model, test_loader):
 
     # store image comparissions in table
     comp_table = wandb.Table(columns=["Real Image", "Generated Image"])
+    once = False
     for i, batch in enumerate(test_loader):
+        if not(once is True):
+            once = True
+            logger.add_graph(model, batch["A"].cuda())
         # Set model input
         real_A = Variable(batch["A"]).cuda()
         fake_B = 0.5 * (model(real_A).data + 1.0)
 
         if not config.real_measurement:
-            comp_table.add_data([wandb.Image(real_A), wandb.Image(fake_B)])
+            comp_table.add_data(wandb.Image(real_A), wandb.Image(fake_B))
             save_image(fake_B, os.path.join(outdir, "%04d.png" % (i + 1)))
     wandb.log(
         {
