@@ -73,6 +73,10 @@ def main():
     config.TEST_RUN = os.environ.get("TEST_RUN", "0") == "1"
     config.stage = "eval"
     config.save = "ckpt/eval"
+    try:
+        config.seed = int(os.environ.get("RNG_SEED", "12345"))
+    except:
+        pass
     # wandb run
     run = wandb.init(
         project="AGD_Maestro",

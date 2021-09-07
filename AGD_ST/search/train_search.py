@@ -58,6 +58,10 @@ def main(pretrain=True):
     # load env configs
     config.USE_MAESTRO = os.environ.get("USE_MAESTRO", "0") == "1"
     config.TEST_RUN = os.environ.get("TEST_RUN", "0") == "1"
+    try:
+        config.seed = int(os.environ.get("RNG_SEED", "12345"))
+    except:
+        pass
     config.pretrain = pretrain
     config.stage = "pretrain" if pretrain else "search"
 

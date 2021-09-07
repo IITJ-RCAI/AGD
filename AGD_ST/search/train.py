@@ -72,6 +72,10 @@ def main():
     config.USE_MAESTRO = os.environ.get("USE_MAESTRO", "0") == "1"
     config.TEST_RUN = os.environ.get("TEST_RUN", "0") == "1"
     config.stage = "train"
+    try:
+        config.seed = int(os.environ.get("RNG_SEED", "12345"))
+    except:
+        pass
 
     # wandb run
     wandb.init(
