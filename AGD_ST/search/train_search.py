@@ -63,21 +63,21 @@ def main(pretrain=True):
     except:
         pass
     config.pretrain = pretrain
-    config.stage = "pretrain" if pretrain else "search"
+    config.stage = "pretrain" if pretrain is True else "search"
 
     # wandb run
     wandb.init(
         project="AGD_Maestro",
-        name=f"{config.dataset}-{config.stage}-{'with' if config.USE_MAESTRO else 'without'}_maestro",
+        name=f"{config.dataset}-{config.stage}-{'with' if config.USE_MAESTRO is True else 'without'}_maestro",
         tags=[config.dataset, "AGD", config.stage]
-        + (["maestro"] if config.USE_MAESTRO else []),
+        + (["maestro"] if config.USE_MAESTRO is True else []),
         entity="rcai",
         group=os.environ.get("WANDB_GROUP", None) or f"AGD_Maestro ({datetime.now()})",
         job_type=f"Stage {config.stage}",
         reinit=True,
         sync_tensorboard=True,
         save_code=True,
-        mode="disabled" if config.TEST_RUN else "online",
+        mode="disabled" if config.TEST_RUN is True else "online",
     )
 
     config.save = "ckpt/{}".format(config.save)
