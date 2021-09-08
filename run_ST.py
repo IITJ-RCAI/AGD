@@ -20,6 +20,8 @@ rep = int(
     input("Enter number of times to repeat run with forked random seeds[1]: ") or "1"
 )
 
+# Gen. random seeds
+random.seed(main_seed)
 seeds = [main_seed, *random.sample(range(int(1e7)), rep - 1)]
 print(f"Random repetition seeds: {seeds}")
 
@@ -90,6 +92,7 @@ ckpt = task_st / "search" / "ckpt"
 
 for seed_idx, rng_seed in enumerate(seeds):
     print(f"Running repetetion {seed_idx+1} with rng seed: {rng_seed}")
+    random.seed(rng_seed)
     os.environ['RNG_SEED'] = str(rng_seed)
     if csl is True:
         clean_slate()
