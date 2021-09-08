@@ -242,7 +242,7 @@ def main(pretrain=True):
 
     # wandb hooks
     wandb.config.update(config)
-    wandb.watch(model, log_graph=True,)
+    wandb.watch(model, log="parameters", log_graph=True,)
 
     # epoch loop, train loop
     for epoch in tbar:

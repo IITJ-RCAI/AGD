@@ -231,9 +231,12 @@ def main():
     best_fid = 1000
     best_epoch = 0
 
+    # wandb hooks
+    wandb.config.update(config)
+    wandb.watch(model, log=None, log_graph=True,)
+
     tbar = tqdm(range(config.nepochs), ncols=80)
     # epoch loop, train loop
-    wandb.config.update(config)
     for epoch in tbar:
         logging.info(config.save)
         logging.info("lr: " + str(optimizer.param_groups[0]["lr"]))

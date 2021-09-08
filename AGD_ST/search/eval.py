@@ -169,18 +169,16 @@ def infer(model, test_loader, logger, run):
 
     # store image comparissions in table
     comp_table = wandb.Table(columns=["Real Image", "Generated Image"])
-    once = False
     for i, batch in enumerate(test_loader):
         # Set model input
         real_A = Variable(batch["A"]).cuda()
-        if not (once is True):
-            once = True
-            logger.add_graph(model, real_A)
         fake_B = 0.5 * (model(real_A).data + 1.0)
 
         if not config.real_measurement:
-            comp_table.add_data(wandb.Image(real_A), wandb.Image(fake_B))
-            save_image(fake_B, os.path.join(outdir, "%04d.png" % (i + 1)))
+            temp_path = os.path.join(outdir, "%04d.png" % (i + 1))
+            save_image(fake_B, temp_path)
+            comp_table.add_data(wandb.Image(real_A), wandb.Image(temp_path))
+    logger.add_graph(model, real_A)
     run.log(
         {
             "Eval._Images": comp_table,
