@@ -118,7 +118,7 @@ for seed_idx, rng_seed in enumerate(seeds):
         if tar_file.exists():
             nn = number_this_file(tar_file)
             tar_file.rename(nn)
-        os.system(f"tar -czvf {str(tar_file)}  -C AGD_ST/search {str(pre_ckpt)}")
+        os.system(f"tar -czvf {str(tar_file)} -C {str(ckpt)} {str(pre_ckpt.name)}")
         print("Done")
 
     # run train_search
@@ -155,7 +155,7 @@ for seed_idx, rng_seed in enumerate(seeds):
             if tar_file.exists():
                 nn = number_this_file(tar_file)
                 tar_file.rename(nn)
-            os.system(f"tar -czvf {str(tar_file)}  -C AGD_ST/search {str(train_ckpt)}")
+            os.system(f"tar -czvf {str(tar_file)} -C {str(ckpt)}h {str(train_ckpt.name)}")
         finally:
             # Replace normal config files
             cfg_train.rename(cfg_train.parent / "config_search.py.train")
@@ -184,7 +184,7 @@ for seed_idx, rng_seed in enumerate(seeds):
         if tar_file.exists():
             nn = number_this_file(tar_file)
             tar_file.rename(nn)
-        os.system(f"tar -czvf {str(tar_file)}  -C AGD_ST/search {str(train_sc_ckpt)}")
+        os.system(f"tar -czvf {str(tar_file)} -C {str(ckpt)} {str(train_sc_ckpt.name)}")
         print("Done")
 
     # Eval
