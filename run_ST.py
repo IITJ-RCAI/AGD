@@ -29,6 +29,8 @@ print(f"Random repetition seeds: {seeds}")
 dG = f"AGD_Maestro ({datetime.now()})"
 os.environ["WANDB_GROUP"] = input(f"WanDB Group name[{dG}]: ") or dG
 
+# Ask for backup
+bkup = input("Do you want to backup ckpt/<stage> folder data?[y/N]") in ('y', 'Y')
 
 # io func
 def banner(msg):
@@ -91,6 +93,7 @@ ckpt = task_st / "search" / "ckpt"
 
 
 for seed_idx, rng_seed in enumerate(seeds):
+    run_prefix = f"seed{rng_seed}"
     print(f"Running repetetion {seed_idx+1} with rng seed: {rng_seed}")
     random.seed(rng_seed)
     os.environ['RNG_SEED'] = str(rng_seed)
@@ -113,12 +116,13 @@ for seed_idx, rng_seed in enumerate(seeds):
     if not skip:
         print("Running pre-train...")
         os.system("cd AGD_ST/search && python train_search.py")
-        # compress checkpoint
-        tar_file = pathlib.Path("pretrain_ckpt.tar.gz")
-        if tar_file.exists():
-            nn = number_this_file(tar_file)
-            tar_file.rename(nn)
-        os.system(f"tar -czvf {str(tar_file)} -C {str(ckpt)} {str(pre_ckpt.name)}")
+        # backup checkpoint
+        if bkup:
+            tar_file = pathlib.Path(f"{run_prefix}_pretrain_ckpt.tar.gz")
+            if tar_file.exists():
+                nn = number_this_file(tar_file)
+                tar_file.rename(nn)
+            os.system(f"tar -czvf {str(tar_file)} -C {str(ckpt)} {str(pre_ckpt.name)}")
         print("Done")
 
     # run train_search
@@ -150,12 +154,13 @@ for seed_idx, rng_seed in enumerate(seeds):
         cfg_train = cfg_train.parent / "config_search.py"
         try:
             os.system("cd AGD_ST/search && python train_search.py")
-            # compress checkpoint
-            tar_file = pathlib.Path("train_ckpt.tar.gz")
-            if tar_file.exists():
-                nn = number_this_file(tar_file)
-                tar_file.rename(nn)
-            os.system(f"tar -czvf {str(tar_file)} -C {str(ckpt)}h {str(train_ckpt.name)}")
+            # backup checkpoint
+            if bkup:
+                tar_file = pathlib.Path(f"{run_prefix}_train_ckpt.tar.gz")
+                if tar_file.exists():
+                    nn = number_this_file(tar_file)
+                    tar_file.rename(nn)
+                os.system(f"tar -czvf {str(tar_file)} -C {str(ckpt)}h {str(train_ckpt.name)}")
         finally:
             # Replace normal config files
             cfg_train.rename(cfg_train.parent / "config_search.py.train")
@@ -179,12 +184,13 @@ for seed_idx, rng_seed in enumerate(seeds):
     if not skip:
         print("Running finetune...")
         os.system("cd AGD_ST/search && python train.py")
-        # compress checkpoint
-        tar_file = pathlib.Path("finetune_ckpt.tar.gz")
-        if tar_file.exists():
-            nn = number_this_file(tar_file)
-            tar_file.rename(nn)
-        os.system(f"tar -czvf {str(tar_file)} -C {str(ckpt)} {str(train_sc_ckpt.name)}")
+        # backup checkpoint
+        if bkup:
+            tar_file = pathlib.Path(f"{run_prefix}_finetune_ckpt.tar.gz")
+            if tar_file.exists():
+                nn = number_this_file(tar_file)
+                tar_file.rename(nn)
+            os.system(f"tar -czvf {str(tar_file)} -C {str(ckpt)} {str(train_sc_ckpt.name)}")
         print("Done")
 
     # Eval
