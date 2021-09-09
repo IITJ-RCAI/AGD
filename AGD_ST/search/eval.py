@@ -132,10 +132,12 @@ def main():
         logger.add_text(
             "model_summary", str(summary(model, input_size=(1, 3, 256, 256)))
         )
+        logger.add_graph(model, torch.zeros((1, 3, 256, 256), device=next(model.parameters()).device))
         print("params = %fMB, FLOPs = %fGB" % (params / 1e6, flops / 1e9))
 
-    # model = torch.nn.DataParallel(model).cuda()
-    model = model.cuda()
+    # Bugfix: https://discuss.pytorch.org/t/solved-keyerror-unexpected-key-module-encoder-embedding-weight-in-state-dict/1686/2
+    # Note: Model summary/graph must be printed before this step.
+    model = torch.nn.DataParallel(model).cuda()
 
     if config.ckpt:
         state_dict = torch.load(config.ckpt)
@@ -178,7 +180,6 @@ def infer(model, test_loader, logger, run):
             temp_path = os.path.join(outdir, "%04d.png" % (i + 1))
             save_image(fake_B, temp_path)
             comp_table.add_data(wandb.Image(real_A), wandb.Image(temp_path))
-    logger.add_graph(model, real_A)
     run.log(
         {
             "Eval._Images": comp_table,

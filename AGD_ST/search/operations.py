@@ -39,7 +39,7 @@ if osp.isfile(table_file_name):
     latency_lookup_table = np.load(table_file_name).item()
 
 flops_lookup_table = {}
-table_file_name = "flops_lookup_table.npy" if os.environ['USE_MAESTRO']=='1' else "maestro_lookup_table.npy"
+table_file_name = "flops_lookup_table.npy" if os.environ.get("USE_MAESTRO", "0") == "1" else "maestro_lookup_table.npy"
 if osp.isfile(table_file_name):
     flops_lookup_table = np.load(table_file_name, allow_pickle=True).item()
 
