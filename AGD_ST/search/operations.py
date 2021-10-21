@@ -38,10 +38,37 @@ table_file_name = "latency_lookup_table_8s.npy"
 if osp.isfile(table_file_name):
     latency_lookup_table = np.load(table_file_name).item()
 
-flops_lookup_table = {}
-table_file_name = "flops_lookup_table.npy" if os.environ.get("USE_MAESTRO", "0") == "1" else "maestro_lookup_table.npy"
-if osp.isfile(table_file_name):
-    flops_lookup_table = np.load(table_file_name, allow_pickle=True).item()
+
+class _dict_wrapper(dict):
+    def __init__(self, *args, **kw):
+        super().__init__(*args, **kw)
+        self._maestro = None
+        self._update_proxy()
+    
+    def _update_proxy(self):
+        cur = self._check_env()
+        if cur != self._maestro:
+            self._maestro = cur
+            self.clear()
+            global table_file_name
+            table_file_name = "flops_lookup_table.npy" if not cur else "maestro_lookup_table.npy"
+            if osp.isfile(table_file_name):
+                self.update(np.load(table_file_name, allow_pickle=True).item())
+
+    def _check_env(self):
+        return os.environ.get('USE_MAESTRO', '0') == '1'
+
+    def __contains__(self, key):
+        self._update_proxy()
+        return super().__contains__(key)
+    
+    def __getitem__(self, key):
+        self._update_proxy()
+        return super().__getitem__(key)
+
+
+table_file_name = "flops_lookup_table.npy" if os.environ.get("USE_MAESTRO", "0") == "0" else "maestro_lookup_table.npy"
+flops_lookup_table = _dict_wrapper()
 
 
 Conv2d = QConv2d
