@@ -8,4 +8,4 @@ apt-get install libboost-all-dev
 git clone https://github.com/maestro-project/maestro
 cd maestro
 scons
-cp ./maestro/maestro /usr/local/bin/maestro
+cp ./maestro /usr/local/bin/maestro
