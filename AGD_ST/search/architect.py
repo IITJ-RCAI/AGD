@@ -6,7 +6,7 @@ from torch.autograd import Variable
 import torchcontrib
 import numpy as np
 from pdb import set_trace as bp
-from thop import profile
+# from thop import profile
 from operations import *
 from genotypes import PRIMITIVES
 

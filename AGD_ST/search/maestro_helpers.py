@@ -8,6 +8,25 @@ import git
 from addict import Dict
 import importlib.util
 from thop import profile as th_profile
+import contextlib
+
+MAESTRO_ENV_KEY = "USE_MAESTRO"
+
+
+def set_maestro(on_off: bool):
+    os.environ[MAESTRO_ENV_KEY] = "1" if on_off is True else "0"
+
+
+def is_maestro():
+    return os.environ.get(MAESTRO_ENV_KEY, "0") == "1"
+
+
+@contextlib.contextmanager
+def with_maestro(on_off: bool):
+    prev = is_maestro()
+    set_maestro(on_off)
+    yield None
+    set_maestro(prev)
 
 
 def model_summary(model, inputs, batch_size=-1, skip_classes=tuple()):
@@ -19,12 +38,12 @@ def model_summary(model, inputs, batch_size=-1, skip_classes=tuple()):
         keys = list(filter(lambda k: k.endswith("conv") or k.endswith("linear"), keys))
         if len(keys) == 0:
             # only process conv and linear modules
-            print(f"skipping {cl}, {keys}")
+            # print(f"skipping {cl}, {keys}")
             return
         keys = "Conv" if keys[0].endswith("conv") else "Linear"
         idx = len(summary)
         sk = f"{keys}-{cl}-{idx+1}"
-        print(f"processing {cl}")
+        # print(f"processing {cl}")
         params = list(m.weight.size())
         if m.bias is not None:
             params += list(m.bias.size())
@@ -66,7 +85,7 @@ def model_summary(model, inputs, batch_size=-1, skip_classes=tuple()):
         rt = [item for sublist in rt for item in sublist]
         return [m.register_forward_hook(_hook)]
 
-    print(f"skip_classes: {skip_classes}")
+    # print(f"skip_classes: {skip_classes}")
     hks = _apply(model)
     model(*inputs)
     for h in hks:
@@ -107,7 +126,7 @@ def make_model_file(layer, inputs, filename, custom_ops=tuple()):
     mae_summary = model_summary(
         layer, inputs, batch_size=inputs[0].shape[0], skip_classes=custom_ops
     )
-    print(f"mae_summary: {mae_summary}")
+    # print(f"mae_summary: {mae_summary}")
     with open(filename, "w") as fo:
         fo.write("Network {} {{\n".format(layer.__module__))
         for key, val in mae_summary.items():
@@ -157,7 +176,7 @@ def profile(layer, inputs=None, custom_ops={}):
         cd_path = maestro.path / "maestro" / "tools" / "frontend"
         mapping_file = data_folder / "mapping" / "op_map.m"
         os.system(
-            f"cd {cd_path} && python modelfile_to_mapping.py --model_file {model_file.name} --dataflow kcp_ws --outfile {mapping_file.name}"
+            f"cd {cd_path} && python modelfile_to_mapping.py --model_file {model_file.name} --dataflow kcp_ws --outfile {mapping_file.name} 1> /dev/null"
         )
         # run maestro
         result = subprocess.check_output(

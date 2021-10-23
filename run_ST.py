@@ -2,7 +2,6 @@ from datetime import datetime
 import os
 import pathlib
 import shutil
-import wandb
 import random
 
 # Input config
@@ -25,12 +24,19 @@ random.seed(main_seed)
 seeds = [main_seed, *random.sample(range(int(1e7)), rep - 1)]
 print(f"Random repetition seeds: {seeds}")
 
+# Ask test run
+test_run = input("Is this a test run? [y/N]: ") in ('y', 'Y')
+if test_run is True:
+    os.environ['TEST_RUN'] = '1'
+
 # Set group name
 dG = f"AGD_Maestro ({datetime.now()})"
 os.environ["WANDB_GROUP"] = input(f"WanDB Group name[{dG}]: ") or dG
 
 # Ask for backup
-bkup = input("Do you want to backup ckpt/<stage> folder data?[y/N]") in ('y', 'Y')
+# bkup = input("Do you want to backup ckpt/<stage> folder data? [y/N]: ") in ('y', 'Y')
+bkup = False
+
 
 # io func
 def banner(msg):
@@ -50,12 +56,12 @@ def number_this_file(fl: pathlib.Path):
 def clean_slate():
     # clear ckpt and output dirs
     rmdirs = [
-        pathlib.Path("./AGD_ST/search/ckpt/"),
-        pathlib.Path("./AGD_ST/search/output/"),
+        pathlib.Path("./AGD_ST/search/ckpt/*"),
+        pathlib.Path("./AGD_ST/search/output/*"),
+        pathlib.Path("./AGD_ST/search/*_lookup_table.npy"),
     ]
     for r in rmdirs:
-        r.resolve()
-        os.system(f"rm -rf {str(r / '*')}")
+        os.system(f"rm -rf {str(r)}")
 
 
 # get input for clean slate run

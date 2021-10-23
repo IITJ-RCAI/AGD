@@ -7,10 +7,10 @@ from genotypes import PRIMITIVES
 # from utils.darts_utils import drop_path, compute_speed, compute_speed_tensorrt
 from pdb import set_trace as bp
 import numpy as np
-from thop import profile
+# from thop import profile
 from matplotlib import pyplot as plt
 from util_gan.vgg_feature import VGGFeature
-from thop import profile
+# from thop import profile
 
 
 # https://github.com/YongfeiYan/Gumbel_Softmax_VAE/blob/master/gumbel_softmax_vae.py

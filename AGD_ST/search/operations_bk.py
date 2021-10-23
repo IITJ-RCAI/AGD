@@ -1,66 +1,131 @@
-from pdb import set_trace as bp
+# from pdb import set_trace as bp
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+# import torch.nn.functional as F
 import numpy as np
-from thop import profile
+from maestro_helpers import profile, is_maestro
 from thop.count_hooks import count_convNd
 import sys
+import os
 import os.path as osp
 from easydict import EasyDict as edict
 from quantize import QConv2d, QuantMeasure, QConvTranspose2d
+from slimmable_ops import USConv2d, USBatchNorm2d, USConvTranspose2d, make_divisible
 
 C = edict()
 """please config ROOT_dir and user when u first using"""
-C.repo_name = 'AGD_ST'
+C.repo_name = "AGD_ST"
 C.abs_dir = osp.realpath(".")
 C.this_dir = C.abs_dir.split(osp.sep)[-1]
-C.root_dir = C.abs_dir[:C.abs_dir.index(C.repo_name) + len(C.repo_name)]
+C.root_dir = C.abs_dir[: C.abs_dir.index(C.repo_name) + len(C.repo_name)]
 """Path Config"""
+
+
 def add_path(path):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-add_path(osp.join(C.root_dir, 'furnace'))
+
+add_path(osp.join(C.root_dir, "furnace"))
 try:
     from utils.darts_utils import compute_latency_ms_tensorrt as compute_latency
+
     print("use TensorRT for latency test")
-except:
+except Exception:
     from utils.darts_utils import compute_latency_ms_pytorch as compute_latency
+
     print("use PyTorch for latency test")
 
-from slimmable_ops import USConv2d, USBatchNorm2d, USConvTranspose2d, make_divisible
 
-__all__ = ['Conv', 'ConvNorm', 'Conv3x3', 'Conv7x7', 'ConvTranspose2dNorm', 'BasicResidual', 'DwsBlock', 'SkipConnect', 'OPS']
+__all__ = [
+    "Conv",
+    "ConvNorm",
+    "Conv3x3",
+    "Conv7x7",
+    "ConvTranspose2dNorm",
+    "BasicResidual",
+    "DwsBlock",
+    "SkipConnect",
+    "OPS",
+]
 
 latency_lookup_table = {}
 table_file_name = "latency_lookup_table_8s.npy"
 if osp.isfile(table_file_name):
     latency_lookup_table = np.load(table_file_name).item()
 
-flops_lookup_table = {}
-table_file_name = "flops_lookup_table.npy"
-if osp.isfile(table_file_name):
-    flops_lookup_table = np.load(table_file_name, allow_pickle=True).item()
+
+class _dict_wrapper(dict):
+    def __init__(self, *args, **kw):
+        super().__init__(*args, **kw)
+        self._maestro = None
+        self._update_proxy()
+
+    def _update_proxy(self):
+        cur = is_maestro()
+        if cur != self._maestro:
+            self._maestro = cur
+            self.clear()
+            global table_file_name
+            table_file_name = (
+                "flops_lookup_table.npy" if not cur else "maestro_lookup_table.npy"
+            )
+            if osp.isfile(table_file_name):
+                self.update(np.load(table_file_name, allow_pickle=True).item())
+
+    def __contains__(self, key):
+        self._update_proxy()
+        return super().__contains__(key)
+
+    def __getitem__(self, key):
+        self._update_proxy()
+        return super().__getitem__(key)
+
+
+table_file_name = (
+    "flops_lookup_table.npy"
+    if os.environ.get("USE_MAESTRO", "0") == "0"
+    else "maestro_lookup_table.npy"
+)
+flops_lookup_table = _dict_wrapper()
 
 
 Conv2d = QConv2d
 ConvTranspose2d = QConvTranspose2d
-BatchNorm2d = nn.InstanceNorm2d    
+BatchNorm2d = nn.InstanceNorm2d
 
 
 def count_custom(m, x, y):
     m.total_ops += 0
 
-custom_ops={QConv2d: count_convNd, QConvTranspose2d:count_convNd, QuantMeasure: count_custom, nn.InstanceNorm2d: count_custom}
+
+custom_ops = {
+    QConv2d: count_convNd,
+    QConvTranspose2d: count_convNd,
+    QuantMeasure: count_custom,
+    nn.InstanceNorm2d: count_custom,
+}
 
 
 class Conv(nn.Module):
-    '''
+    """
     conv => norm => activation
     use native Conv2d, not slimmable
-    '''
-    def __init__(self, C_in, C_out, kernel_size=3, stride=1, padding=None, dilation=1, groups=1, bias=False, slimmable=False, width_mult_list=[1.]):
+    """
+
+    def __init__(
+        self,
+        C_in,
+        C_out,
+        kernel_size=3,
+        stride=1,
+        padding=None,
+        dilation=1,
+        groups=1,
+        bias=False,
+        slimmable=False,
+        width_mult_list=[1.0],
+    ):
         super(Conv, self).__init__()
         self.C_in = C_in
         self.C_out = C_out
@@ -69,7 +134,9 @@ class Conv(nn.Module):
         self.stride = stride
         if padding is None:
             # assume h_out = h_in / s
-            self.padding = int(np.ceil((dilation * (kernel_size - 1) + 1 - stride) / 2.))
+            self.padding = int(
+                np.ceil((dilation * (kernel_size - 1) + 1 - stride) / 2.0)
+            )
         else:
             self.padding = padding
         self.dilation = dilation
@@ -81,15 +148,33 @@ class Conv(nn.Module):
         self.bias = bias
         self.slimmable = slimmable
         self.width_mult_list = width_mult_list
-        self.ratio = (1., 1.)
+        self.ratio = (1.0, 1.0)
 
         if slimmable:
-            self.conv = USConv2d(C_in, C_out, kernel_size, stride, padding=self.padding, dilation=dilation, groups=self.groups, bias=bias, width_mult_list=width_mult_list)
+            self.conv = USConv2d(
+                C_in,
+                C_out,
+                kernel_size,
+                stride,
+                padding=self.padding,
+                dilation=dilation,
+                groups=self.groups,
+                bias=bias,
+                width_mult_list=width_mult_list,
+            )
 
         else:
-            self.conv = Conv2d(C_in, C_out, kernel_size, stride, padding=self.padding, dilation=dilation, groups=self.groups, bias=bias)
-            
-    
+            self.conv = Conv2d(
+                C_in,
+                C_out,
+                kernel_size,
+                stride,
+                padding=self.padding,
+                dilation=dilation,
+                groups=self.groups,
+                bias=bias,
+            )
+
     def set_ratio(self, ratio):
         assert self.slimmable
         assert len(ratio) == 2
@@ -97,58 +182,151 @@ class Conv(nn.Module):
         self.conv.set_ratio(ratio)
 
     @staticmethod
-    def _flops(h, w, C_in, C_out, kernel_size=3, stride=1, padding=None, dilation=1, groups=1, bias=False):
-        layer = Conv(C_in, C_out, kernel_size, stride, padding, dilation, groups, bias, slimmable=False)
-        flops, params = profile(layer, inputs=(torch.randn(1, C_in, h, w),), custom_ops=custom_ops)
+    def _flops(
+        h,
+        w,
+        C_in,
+        C_out,
+        kernel_size=3,
+        stride=1,
+        padding=None,
+        dilation=1,
+        groups=1,
+        bias=False,
+    ):
+        layer = Conv(
+            C_in,
+            C_out,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bias,
+            slimmable=False,
+        )
+        flops, params = profile(
+            layer, inputs=(torch.randn(1, C_in, h, w),), custom_ops=custom_ops
+        )
         return flops
-    
+
     @staticmethod
-    def _latency(h, w, C_in, C_out, kernel_size=3, stride=1, padding=None, dilation=1, groups=1, bias=False):
-        layer = Conv(C_in, C_out, kernel_size, stride, padding, dilation, groups, bias, slimmable=False)
+    def _latency(
+        h,
+        w,
+        C_in,
+        C_out,
+        kernel_size=3,
+        stride=1,
+        padding=None,
+        dilation=1,
+        groups=1,
+        bias=False,
+    ):
+        layer = Conv(
+            C_in,
+            C_out,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bias,
+            slimmable=False,
+        )
         latency = compute_latency(layer, (1, C_in, h, w))
         return latency
 
     def forward_latency(self, size):
         c_in, h_in, w_in = size
         if self.slimmable:
-            assert c_in == make_divisible(self.C_in * self.ratio[0]), "c_in %d, self.C_in * self.ratio[0] %d"%(c_in, self.C_in * self.ratio[0])
+            assert c_in == make_divisible(
+                self.C_in * self.ratio[0]
+            ), "c_in %d, self.C_in * self.ratio[0] %d" % (
+                c_in,
+                self.C_in * self.ratio[0],
+            )
             c_out = make_divisible(self.C_out * self.ratio[1])
         else:
-            assert c_in == self.C_in, "c_in %d, self.C_in %d"%(c_in, self.C_in)
+            assert c_in == self.C_in, "c_in %d, self.C_in %d" % (c_in, self.C_in)
             c_out = self.C_out
         if self.stride == 1:
-            h_out = h_in; w_out = w_in
+            h_out = h_in
+            w_out = w_in
         else:
-            h_out = h_in // 2; w_out = w_in // 2
-        name = "Conv_H%d_W%d_Cin%d_Cout%d_kernel%d_stride%d"%(h_in, w_in, c_in, c_out, self.kernel_size, self.stride)
+            h_out = h_in // 2
+            w_out = w_in // 2
+        name = "Conv_H%d_W%d_Cin%d_Cout%d_kernel%d_stride%d" % (
+            h_in,
+            w_in,
+            c_in,
+            c_out,
+            self.kernel_size,
+            self.stride,
+        )
         if name in latency_lookup_table:
             latency = latency_lookup_table[name]
         else:
             print("not found in latency_lookup_table:", name)
-            latency = Conv._latency(h_in, w_in, c_in, c_out, self.kernel_size, self.stride, self.padding, self.dilation, self.groups, self.bias)
+            latency = Conv._latency(
+                h_in,
+                w_in,
+                c_in,
+                c_out,
+                self.kernel_size,
+                self.stride,
+                self.padding,
+                self.dilation,
+                self.groups,
+                self.bias,
+            )
             latency_lookup_table[name] = latency
             np.save(table_file_name, latency_lookup_table)
         return latency, (c_out, h_out, w_out)
 
-
     def forward_flops(self, size, quantize=False):
         c_in, h_in, w_in = size
         if self.slimmable:
-            assert c_in == make_divisible(self.C_in * self.ratio[0]), "c_in %d, self.C_in * self.ratio[0] %d"%(c_in, self.C_in * self.ratio[0])
+            assert c_in == make_divisible(
+                self.C_in * self.ratio[0]
+            ), "c_in %d, self.C_in * self.ratio[0] %d" % (
+                c_in,
+                self.C_in * self.ratio[0],
+            )
             c_out = make_divisible(self.C_out * self.ratio[1])
         else:
-            assert c_in == self.C_in, "c_in %d, self.C_in %d"%(c_in, self.C_in)
+            assert c_in == self.C_in, "c_in %d, self.C_in %d" % (c_in, self.C_in)
             c_out = self.C_out
         if self.stride == 1:
-            h_out = h_in; w_out = w_in
+            h_out = h_in
+            w_out = w_in
         else:
-            h_out = h_in // 2; w_out = w_in // 2
-        name = "Conv_H%d_W%d_Cin%d_Cout%d_kernel%d_stride%d"%(h_in, w_in, c_in, c_out, self.kernel_size, self.stride)
+            h_out = h_in // 2
+            w_out = w_in // 2
+        name = "Conv_H%d_W%d_Cin%d_Cout%d_kernel%d_stride%d" % (
+            h_in,
+            w_in,
+            c_in,
+            c_out,
+            self.kernel_size,
+            self.stride,
+        )
         if name in flops_lookup_table:
             flops = flops_lookup_table[name]
         else:
             print("not found in flops_lookup_table:", name)
-            flops = Conv._flops(h_in, w_in, c_in, c_out, self.kernel_size, self.stride, self.padding, self.dilation, self.groups, self.bias)
+            flops = Conv._flops(
+                h_in,
+                w_in,
+                c_in,
+                c_out,
+                self.kernel_size,
+                self.stride,
+                self.padding,
+                self.dilation,
+                self.groups,
+                self.bias,
+            )
             flops_lookup_table[name] = flops
             np.save(table_file_name, flops_lookup_table)
         # if quantize:
@@ -156,18 +334,30 @@ class Conv(nn.Module):
 
         return flops, (c_out, h_out, w_out)
 
-
     def forward(self, x, quantize=False):
         x = self.conv(x, quantize=quantize)
         return x
 
 
 class ConvNorm(nn.Module):
-    '''
+    """
     conv => norm => activation
     use native Conv2d, not slimmable
-    '''
-    def __init__(self, C_in, C_out, kernel_size=3, stride=1, padding=None, dilation=1, groups=1, bias=False, slimmable=False, width_mult_list=[1.]):
+    """
+
+    def __init__(
+        self,
+        C_in,
+        C_out,
+        kernel_size=3,
+        stride=1,
+        padding=None,
+        dilation=1,
+        groups=1,
+        bias=False,
+        slimmable=False,
+        width_mult_list=[1.0],
+    ):
         super(ConvNorm, self).__init__()
         self.C_in = C_in
         self.C_out = C_out
@@ -176,7 +366,9 @@ class ConvNorm(nn.Module):
         self.stride = stride
         if padding is None:
             # assume h_out = h_in / s
-            self.padding = int(np.ceil((dilation * (kernel_size - 1) + 1 - stride) / 2.))
+            self.padding = int(
+                np.ceil((dilation * (kernel_size - 1) + 1 - stride) / 2.0)
+            )
         else:
             self.padding = padding
         self.dilation = dilation
@@ -188,19 +380,37 @@ class ConvNorm(nn.Module):
         self.bias = bias
         self.slimmable = slimmable
         self.width_mult_list = width_mult_list
-        self.ratio = (1., 1.)
+        self.ratio = (1.0, 1.0)
 
         if slimmable:
-            self.conv = USConv2d(C_in, C_out, kernel_size, stride, padding=self.padding, dilation=dilation, groups=self.groups, bias=bias, width_mult_list=width_mult_list)
+            self.conv = USConv2d(
+                C_in,
+                C_out,
+                kernel_size,
+                stride,
+                padding=self.padding,
+                dilation=dilation,
+                groups=self.groups,
+                bias=bias,
+                width_mult_list=width_mult_list,
+            )
             self.bn = USBatchNorm2d(C_out, width_mult_list)
             self.relu = nn.ReLU(inplace=True)
-            
+
         else:
-            self.conv = Conv2d(C_in, C_out, kernel_size, stride, padding=self.padding, dilation=dilation, groups=self.groups, bias=bias)
+            self.conv = Conv2d(
+                C_in,
+                C_out,
+                kernel_size,
+                stride,
+                padding=self.padding,
+                dilation=dilation,
+                groups=self.groups,
+                bias=bias,
+            )
             self.bn = BatchNorm2d(C_out)
             self.relu = nn.ReLU(inplace=True)
-            
-    
+
     def set_ratio(self, ratio):
         assert self.slimmable
         assert len(ratio) == 2
@@ -209,65 +419,157 @@ class ConvNorm(nn.Module):
         self.bn.set_ratio(ratio[1])
 
     @staticmethod
-    def _flops(h, w, C_in, C_out, kernel_size=3, stride=1, padding=None, dilation=1, groups=1, bias=False):
-        layer = ConvNorm(C_in, C_out, kernel_size, stride, padding, dilation, groups, bias, slimmable=False)
-        flops, params = profile(layer, inputs=(torch.randn(1, C_in, h, w),), custom_ops=custom_ops)
+    def _flops(
+        h,
+        w,
+        C_in,
+        C_out,
+        kernel_size=3,
+        stride=1,
+        padding=None,
+        dilation=1,
+        groups=1,
+        bias=False,
+    ):
+        layer = ConvNorm(
+            C_in,
+            C_out,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bias,
+            slimmable=False,
+        )
+        flops, params = profile(
+            layer, inputs=(torch.randn(1, C_in, h, w),), custom_ops=custom_ops
+        )
         return flops
-    
+
     @staticmethod
-    def _latency(h, w, C_in, C_out, kernel_size=3, stride=1, padding=None, dilation=1, groups=1, bias=False):
-        layer = ConvNorm(C_in, C_out, kernel_size, stride, padding, dilation, groups, bias, slimmable=False)
+    def _latency(
+        h,
+        w,
+        C_in,
+        C_out,
+        kernel_size=3,
+        stride=1,
+        padding=None,
+        dilation=1,
+        groups=1,
+        bias=False,
+    ):
+        layer = ConvNorm(
+            C_in,
+            C_out,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bias,
+            slimmable=False,
+        )
         latency = compute_latency(layer, (1, C_in, h, w))
         return latency
 
     def forward_latency(self, size):
         c_in, h_in, w_in = size
         if self.slimmable:
-            assert c_in == make_divisible(self.C_in * self.ratio[0]), "c_in %d, self.C_in * self.ratio[0] %d"%(c_in, self.C_in * self.ratio[0])
+            assert c_in == make_divisible(
+                self.C_in * self.ratio[0]
+            ), "c_in %d, self.C_in * self.ratio[0] %d" % (
+                c_in,
+                self.C_in * self.ratio[0],
+            )
             c_out = make_divisible(self.C_out * self.ratio[1])
         else:
-            assert c_in == self.C_in, "c_in %d, self.C_in %d"%(c_in, self.C_in)
+            assert c_in == self.C_in, "c_in %d, self.C_in %d" % (c_in, self.C_in)
             c_out = self.C_out
         if self.stride == 1:
-            h_out = h_in; w_out = w_in
+            h_out = h_in
+            w_out = w_in
         else:
-            h_out = h_in // 2; w_out = w_in // 2
-        name = "ConvNorm_H%d_W%d_Cin%d_Cout%d_kernel%d_stride%d"%(h_in, w_in, c_in, c_out, self.kernel_size, self.stride)
+            h_out = h_in // 2
+            w_out = w_in // 2
+        name = "ConvNorm_H%d_W%d_Cin%d_Cout%d_kernel%d_stride%d" % (
+            h_in,
+            w_in,
+            c_in,
+            c_out,
+            self.kernel_size,
+            self.stride,
+        )
         if name in latency_lookup_table:
             latency = latency_lookup_table[name]
         else:
             print("not found in latency_lookup_table:", name)
-            latency = ConvNorm._latency(h_in, w_in, c_in, c_out, self.kernel_size, self.stride, self.padding, self.dilation, self.groups, self.bias)
+            latency = ConvNorm._latency(
+                h_in,
+                w_in,
+                c_in,
+                c_out,
+                self.kernel_size,
+                self.stride,
+                self.padding,
+                self.dilation,
+                self.groups,
+                self.bias,
+            )
             latency_lookup_table[name] = latency
             np.save(table_file_name, latency_lookup_table)
         return latency, (c_out, h_out, w_out)
 
-
     def forward_flops(self, size, quantize=False):
         c_in, h_in, w_in = size
         if self.slimmable:
-            assert c_in == make_divisible(self.C_in * self.ratio[0]), "c_in %d, self.C_in * self.ratio[0] %d"%(c_in, self.C_in * self.ratio[0])
+            assert c_in == make_divisible(
+                self.C_in * self.ratio[0]
+            ), "c_in %d, self.C_in * self.ratio[0] %d" % (
+                c_in,
+                self.C_in * self.ratio[0],
+            )
             c_out = make_divisible(self.C_out * self.ratio[1])
         else:
-            assert c_in == self.C_in, "c_in %d, self.C_in %d"%(c_in, self.C_in)
+            assert c_in == self.C_in, "c_in %d, self.C_in %d" % (c_in, self.C_in)
             c_out = self.C_out
         if self.stride == 1:
-            h_out = h_in; w_out = w_in
+            h_out = h_in
+            w_out = w_in
         else:
-            h_out = h_in // 2; w_out = w_in // 2
-        name = "ConvNorm_H%d_W%d_Cin%d_Cout%d_kernel%d_stride%d"%(h_in, w_in, c_in, c_out, self.kernel_size, self.stride)
+            h_out = h_in // 2
+            w_out = w_in // 2
+        name = "ConvNorm_H%d_W%d_Cin%d_Cout%d_kernel%d_stride%d" % (
+            h_in,
+            w_in,
+            c_in,
+            c_out,
+            self.kernel_size,
+            self.stride,
+        )
         if name in flops_lookup_table:
             flops = flops_lookup_table[name]
         else:
             print("not found in flops_lookup_table:", name)
-            flops = ConvNorm._flops(h_in, w_in, c_in, c_out, self.kernel_size, self.stride, self.padding, self.dilation, self.groups, self.bias)
+            flops = ConvNorm._flops(
+                h_in,
+                w_in,
+                c_in,
+                c_out,
+                self.kernel_size,
+                self.stride,
+                self.padding,
+                self.dilation,
+                self.groups,
+                self.bias,
+            )
             flops_lookup_table[name] = flops
             np.save(table_file_name, flops_lookup_table)
         # if quantize:
         #     flops /= 4
 
         return flops, (c_out, h_out, w_out)
-
 
     def forward(self, x, quantize=False):
         x = self.conv(x, quantize=quantize)
@@ -277,11 +579,24 @@ class ConvNorm(nn.Module):
 
 
 class ConvTranspose2dNorm(nn.Module):
-    '''
+    """
     conv => norm => activation
     use native Conv2d, not slimmable
-    '''
-    def __init__(self, C_in, C_out, kernel_size=3, stride=2, padding=None, dilation=1, groups=1, bias=False, slimmable=True, width_mult_list=[1.]):
+    """
+
+    def __init__(
+        self,
+        C_in,
+        C_out,
+        kernel_size=3,
+        stride=2,
+        padding=None,
+        dilation=1,
+        groups=1,
+        bias=False,
+        slimmable=True,
+        width_mult_list=[1.0],
+    ):
         super(ConvTranspose2dNorm, self).__init__()
         self.C_in = C_in
         self.C_out = C_out
@@ -298,19 +613,39 @@ class ConvTranspose2dNorm(nn.Module):
         self.bias = bias
         self.slimmable = slimmable
         self.width_mult_list = width_mult_list
-        self.ratio = (1., 1.)
+        self.ratio = (1.0, 1.0)
 
         if slimmable:
-            self.conv = USConvTranspose2d(C_in, C_out, kernel_size, stride, padding=self.padding,  output_padding=1, dilation=dilation, groups=self.groups, bias=bias, width_mult_list=width_mult_list)
+            self.conv = USConvTranspose2d(
+                C_in,
+                C_out,
+                kernel_size,
+                stride,
+                padding=self.padding,
+                output_padding=1,
+                dilation=dilation,
+                groups=self.groups,
+                bias=bias,
+                width_mult_list=width_mult_list,
+            )
             self.bn = USBatchNorm2d(C_out, width_mult_list)
             self.relu = nn.ReLU(inplace=True)
-            
+
         else:
-            self.conv = ConvTranspose2d(C_in, C_out, kernel_size, stride, padding=self.padding,  output_padding=1, dilation=dilation, groups=self.groups, bias=bias)
+            self.conv = ConvTranspose2d(
+                C_in,
+                C_out,
+                kernel_size,
+                stride,
+                padding=self.padding,
+                output_padding=1,
+                dilation=dilation,
+                groups=self.groups,
+                bias=bias,
+            )
             self.bn = BatchNorm2d(C_out)
             self.relu = nn.ReLU(inplace=True)
-            
-    
+
     def set_ratio(self, ratio):
         assert self.slimmable
         assert len(ratio) == 2
@@ -319,65 +654,157 @@ class ConvTranspose2dNorm(nn.Module):
         self.bn.set_ratio(ratio[1])
 
     @staticmethod
-    def _flops(h, w, C_in, C_out, kernel_size=3, stride=1, padding=None, dilation=1, groups=1, bias=False):
-        layer = ConvTranspose2dNorm(C_in, C_out, kernel_size, stride, padding, dilation, groups, bias, slimmable=False)
-        flops, params = profile(layer, inputs=(torch.randn(1, C_in, h, w),), custom_ops=custom_ops)
+    def _flops(
+        h,
+        w,
+        C_in,
+        C_out,
+        kernel_size=3,
+        stride=1,
+        padding=None,
+        dilation=1,
+        groups=1,
+        bias=False,
+    ):
+        layer = ConvTranspose2dNorm(
+            C_in,
+            C_out,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bias,
+            slimmable=False,
+        )
+        flops, params = profile(
+            layer, inputs=(torch.randn(1, C_in, h, w),), custom_ops=custom_ops
+        )
         return flops
-    
+
     @staticmethod
-    def _latency(h, w, C_in, C_out, kernel_size=3, stride=1, padding=None, dilation=1, groups=1, bias=False):
-        layer = ConvTranspose2dNorm(C_in, C_out, kernel_size, stride, padding, dilation, groups, bias, slimmable=False)
+    def _latency(
+        h,
+        w,
+        C_in,
+        C_out,
+        kernel_size=3,
+        stride=1,
+        padding=None,
+        dilation=1,
+        groups=1,
+        bias=False,
+    ):
+        layer = ConvTranspose2dNorm(
+            C_in,
+            C_out,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bias,
+            slimmable=False,
+        )
         latency = compute_latency(layer, (1, C_in, h, w))
         return latency
 
     def forward_latency(self, size):
         c_in, h_in, w_in = size
         if self.slimmable:
-            assert c_in == make_divisible(self.C_in * self.ratio[0]), "c_in %d, self.C_in * self.ratio[0] %d"%(c_in, self.C_in * self.ratio[0])
+            assert c_in == make_divisible(
+                self.C_in * self.ratio[0]
+            ), "c_in %d, self.C_in * self.ratio[0] %d" % (
+                c_in,
+                self.C_in * self.ratio[0],
+            )
             c_out = make_divisible(self.C_out * self.ratio[1])
         else:
-            assert c_in == self.C_in, "c_in %d, self.C_in %d"%(c_in, self.C_in)
+            assert c_in == self.C_in, "c_in %d, self.C_in %d" % (c_in, self.C_in)
             c_out = self.C_out
         if self.stride == 1:
-            h_out = h_in; w_out = w_in
+            h_out = h_in
+            w_out = w_in
         else:
-            h_out = h_in // 2; w_out = w_in // 2
-        name = "ConvTranspose2dNorm_H%d_W%d_Cin%d_Cout%d_kernel%d_stride%d"%(h_in, w_in, c_in, c_out, self.kernel_size, self.stride)
+            h_out = h_in // 2
+            w_out = w_in // 2
+        name = "ConvTranspose2dNorm_H%d_W%d_Cin%d_Cout%d_kernel%d_stride%d" % (
+            h_in,
+            w_in,
+            c_in,
+            c_out,
+            self.kernel_size,
+            self.stride,
+        )
         if name in latency_lookup_table:
             latency = latency_lookup_table[name]
         else:
             print("not found in latency_lookup_table:", name)
-            latency = ConvTranspose2dNorm._latency(h_in, w_in, c_in, c_out, self.kernel_size, self.stride, self.padding, self.dilation, self.groups, self.bias)
+            latency = ConvTranspose2dNorm._latency(
+                h_in,
+                w_in,
+                c_in,
+                c_out,
+                self.kernel_size,
+                self.stride,
+                self.padding,
+                self.dilation,
+                self.groups,
+                self.bias,
+            )
             latency_lookup_table[name] = latency
             np.save(table_file_name, latency_lookup_table)
         return latency, (c_out, h_out, w_out)
 
-
     def forward_flops(self, size, quantize=False):
         c_in, h_in, w_in = size
         if self.slimmable:
-            assert c_in == make_divisible(self.C_in * self.ratio[0]), "c_in %d, self.C_in * self.ratio[0] %d"%(c_in, self.C_in * self.ratio[0])
+            assert c_in == make_divisible(
+                self.C_in * self.ratio[0]
+            ), "c_in %d, self.C_in * self.ratio[0] %d" % (
+                c_in,
+                self.C_in * self.ratio[0],
+            )
             c_out = make_divisible(self.C_out * self.ratio[1])
         else:
-            assert c_in == self.C_in, "c_in %d, self.C_in %d"%(c_in, self.C_in)
+            assert c_in == self.C_in, "c_in %d, self.C_in %d" % (c_in, self.C_in)
             c_out = self.C_out
         if self.stride == 1:
-            h_out = h_in; w_out = w_in
+            h_out = h_in
+            w_out = w_in
         else:
-            h_out = h_in // 2; w_out = w_in // 2
-        name = "ConvTranspose2dNorm_H%d_W%d_Cin%d_Cout%d_kernel%d_stride%d"%(h_in, w_in, c_in, c_out, self.kernel_size, self.stride)
+            h_out = h_in // 2
+            w_out = w_in // 2
+        name = "ConvTranspose2dNorm_H%d_W%d_Cin%d_Cout%d_kernel%d_stride%d" % (
+            h_in,
+            w_in,
+            c_in,
+            c_out,
+            self.kernel_size,
+            self.stride,
+        )
         if name in flops_lookup_table:
             flops = flops_lookup_table[name]
         else:
             print("not found in flops_lookup_table:", name)
-            flops = ConvTranspose2dNorm._flops(h_in, w_in, c_in, c_out, self.kernel_size, self.stride, self.padding, self.dilation, self.groups, self.bias)
+            flops = ConvTranspose2dNorm._flops(
+                h_in,
+                w_in,
+                c_in,
+                c_out,
+                self.kernel_size,
+                self.stride,
+                self.padding,
+                self.dilation,
+                self.groups,
+                self.bias,
+            )
             flops_lookup_table[name] = flops
             np.save(table_file_name, flops_lookup_table)
         # if quantize:
         #     flops /= 4
 
         return flops, (c_out, h_out, w_out)
-
 
     def forward(self, x, quantize=False):
         x = self.conv(x, quantize=quantize)
@@ -387,7 +814,17 @@ class ConvTranspose2dNorm(nn.Module):
 
 
 class Conv7x7(nn.Module):
-    def __init__(self, C_in, C_out, kernel_size=7, stride=1, dilation=1, groups=1, slimmable=True, width_mult_list=[1.]):
+    def __init__(
+        self,
+        C_in,
+        C_out,
+        kernel_size=7,
+        stride=1,
+        dilation=1,
+        groups=1,
+        slimmable=True,
+        width_mult_list=[1.0],
+    ):
         super(Conv7x7, self).__init__()
         # Both self.conv1 and self.downsample layers downsample the input when stride != 1
         self.C_in = C_in
@@ -399,14 +836,34 @@ class Conv7x7(nn.Module):
         self.slimmable = slimmable
         self.width_mult_list = width_mult_list
         assert stride in [1, 2]
-        if self.stride == 2: self.dilation = 1
-        self.ratio = (1., 1.)
+        if self.stride == 2:
+            self.dilation = 1
+        self.ratio = (1.0, 1.0)
 
         if slimmable:
-            self.conv1 = USConv2d(C_in, C_out, 7, stride, padding=3, dilation=dilation, groups=groups, bias=False, width_mult_list=width_mult_list)
+            self.conv1 = USConv2d(
+                C_in,
+                C_out,
+                7,
+                stride,
+                padding=3,
+                dilation=dilation,
+                groups=groups,
+                bias=False,
+                width_mult_list=width_mult_list,
+            )
         else:
-            self.conv1 = Conv2d(C_in, C_out, 7, stride, padding=3, dilation=dilation, groups=groups, bias=False)
-    
+            self.conv1 = Conv2d(
+                C_in,
+                C_out,
+                7,
+                stride,
+                padding=3,
+                dilation=dilation,
+                groups=groups,
+                bias=False,
+            )
+
     def set_ratio(self, ratio):
         assert len(ratio) == 2
         self.ratio = ratio
@@ -414,57 +871,108 @@ class Conv7x7(nn.Module):
 
     @staticmethod
     def _flops(h, w, C_in, C_out, kernel_size=7, stride=1, dilation=1, groups=1):
-        layer = Conv7x7(C_in, C_out, kernel_size, stride, dilation, groups, slimmable=False)
-        flops, params = profile(layer, inputs=(torch.randn(1, C_in, h, w),), custom_ops=custom_ops)
+        layer = Conv7x7(
+            C_in, C_out, kernel_size, stride, dilation, groups, slimmable=False
+        )
+        flops, params = profile(
+            layer, inputs=(torch.randn(1, C_in, h, w),), custom_ops=custom_ops
+        )
         return flops
-    
+
     @staticmethod
     def _latency(h, w, C_in, C_out, kernel_size=7, stride=1, dilation=1, groups=1):
-        layer = Conv7x7(C_in, C_out, kernel_size, stride, dilation, groups, slimmable=False)
+        layer = Conv7x7(
+            C_in, C_out, kernel_size, stride, dilation, groups, slimmable=False
+        )
         latency = compute_latency(layer, (1, C_in, h, w))
         return latency
 
     def forward_latency(self, size):
         c_in, h_in, w_in = size
         if self.slimmable:
-            assert c_in == make_divisible(self.C_in * self.ratio[0]), "c_in %d, int(self.C_in * self.ratio[0]) %d"%(c_in, int(self.C_in * self.ratio[0]))
+            assert c_in == make_divisible(
+                self.C_in * self.ratio[0]
+            ), "c_in %d, int(self.C_in * self.ratio[0]) %d" % (
+                c_in,
+                int(self.C_in * self.ratio[0]),
+            )
             c_out = make_divisible(self.C_out * self.ratio[1])
         else:
-            assert c_in == self.C_in, "c_in %d, self.C_in %d"%(c_in, self.C_in)
+            assert c_in == self.C_in, "c_in %d, self.C_in %d" % (c_in, self.C_in)
             c_out = self.C_out
         if self.stride == 1:
-            h_out = h_in; w_out = w_in
+            h_out = h_in
+            w_out = w_in
         else:
-            h_out = h_in // 2; w_out = w_in // 2
-        name = "Conv7x7_H%d_W%d_Cin%d_Cout%d_stride%d_dilation%d"%(h_in, w_in, c_in, c_out, self.stride, self.dilation)
+            h_out = h_in // 2
+            w_out = w_in // 2
+        name = "Conv7x7_H%d_W%d_Cin%d_Cout%d_stride%d_dilation%d" % (
+            h_in,
+            w_in,
+            c_in,
+            c_out,
+            self.stride,
+            self.dilation,
+        )
         if name in latency_lookup_table:
             latency = latency_lookup_table[name]
         else:
             print("not found in latency_lookup_table:", name)
-            latency = Conv7x7._latency(h_in, w_in, c_in, c_out, self.kernel_size, self.stride, self.dilation, self.groups)
+            latency = Conv7x7._latency(
+                h_in,
+                w_in,
+                c_in,
+                c_out,
+                self.kernel_size,
+                self.stride,
+                self.dilation,
+                self.groups,
+            )
             latency_lookup_table[name] = latency
             np.save(table_file_name, latency_lookup_table)
         return latency, (c_out, h_out, w_out)
 
-
     def forward_flops(self, size, quantize=False):
         c_in, h_in, w_in = size
         if self.slimmable:
-            assert c_in == make_divisible(self.C_in * self.ratio[0]), "c_in %d, self.C_in * self.ratio[0] %d"%(c_in, self.C_in * self.ratio[0])
+            assert c_in == make_divisible(
+                self.C_in * self.ratio[0]
+            ), "c_in %d, self.C_in * self.ratio[0] %d" % (
+                c_in,
+                self.C_in * self.ratio[0],
+            )
             c_out = make_divisible(self.C_out * self.ratio[1])
         else:
-            assert c_in == self.C_in, "c_in %d, self.C_in %d"%(c_in, self.C_in)
+            assert c_in == self.C_in, "c_in %d, self.C_in %d" % (c_in, self.C_in)
             c_out = self.C_out
         if self.stride == 1:
-            h_out = h_in; w_out = w_in
+            h_out = h_in
+            w_out = w_in
         else:
-            h_out = h_in // 2; w_out = w_in // 2
-        name = "Conv7x7_H%d_W%d_Cin%d_Cout%d_kernel%d_stride%d"%(h_in, w_in, c_in, c_out, self.kernel_size, self.stride)
+            h_out = h_in // 2
+            w_out = w_in // 2
+        name = "Conv7x7_H%d_W%d_Cin%d_Cout%d_kernel%d_stride%d" % (
+            h_in,
+            w_in,
+            c_in,
+            c_out,
+            self.kernel_size,
+            self.stride,
+        )
         if name in flops_lookup_table:
             flops = flops_lookup_table[name]
         else:
             print("not found in flops_lookup_table:", name)
-            flops = Conv7x7._flops(h_in, w_in, c_in, c_out, self.kernel_size, self.stride, self.dilation, self.groups)
+            flops = Conv7x7._flops(
+                h_in,
+                w_in,
+                c_in,
+                c_out,
+                self.kernel_size,
+                self.stride,
+                self.dilation,
+                self.groups,
+            )
             flops_lookup_table[name] = flops
             np.save(table_file_name, flops_lookup_table)
         # if quantize:
@@ -472,16 +980,25 @@ class Conv7x7(nn.Module):
 
         return flops, (c_out, h_out, w_out)
 
-
     def forward(self, x, quantize=False):
-        identity = x
+        # identity = x
         out = self.conv1(x, quantize=quantize)
 
         return out
 
 
 class Conv3x3(nn.Module):
-    def __init__(self, C_in, C_out, kernel_size=3, stride=1, dilation=1, groups=1, slimmable=True, width_mult_list=[1.]):
+    def __init__(
+        self,
+        C_in,
+        C_out,
+        kernel_size=3,
+        stride=1,
+        dilation=1,
+        groups=1,
+        slimmable=True,
+        width_mult_list=[1.0],
+    ):
         super(Conv3x3, self).__init__()
         # Both self.conv1 and self.downsample layers downsample the input when stride != 1
         self.C_in = C_in
@@ -493,18 +1010,38 @@ class Conv3x3(nn.Module):
         self.slimmable = slimmable
         self.width_mult_list = width_mult_list
         assert stride in [1, 2]
-        if self.stride == 2: self.dilation = 1
-        self.ratio = (1., 1.)
+        if self.stride == 2:
+            self.dilation = 1
+        self.ratio = (1.0, 1.0)
 
         self.relu = nn.ReLU(inplace=True)
         if slimmable:
-            self.conv1 = USConv2d(C_in, C_out, 3, stride, padding=dilation, dilation=dilation, groups=groups, bias=False, width_mult_list=width_mult_list)
+            self.conv1 = USConv2d(
+                C_in,
+                C_out,
+                3,
+                stride,
+                padding=dilation,
+                dilation=dilation,
+                groups=groups,
+                bias=False,
+                width_mult_list=width_mult_list,
+            )
             self.bn1 = USBatchNorm2d(C_out, width_mult_list)
         else:
-            self.conv1 = Conv2d(C_in, C_out, 3, stride, padding=dilation, dilation=dilation, groups=groups, bias=False)
+            self.conv1 = Conv2d(
+                C_in,
+                C_out,
+                3,
+                stride,
+                padding=dilation,
+                dilation=dilation,
+                groups=groups,
+                bias=False,
+            )
             # self.bn1 = nn.BatchNorm2d(C_out)
             self.bn1 = BatchNorm2d(C_out)
-    
+
     def set_ratio(self, ratio):
         assert len(ratio) == 2
         self.ratio = ratio
@@ -513,57 +1050,108 @@ class Conv3x3(nn.Module):
 
     @staticmethod
     def _flops(h, w, C_in, C_out, kernel_size=3, stride=1, dilation=1, groups=1):
-        layer = Conv3x3(C_in, C_out, kernel_size, stride, dilation, groups, slimmable=False)
-        flops, params = profile(layer, inputs=(torch.randn(1, C_in, h, w),), custom_ops=custom_ops)
+        layer = Conv3x3(
+            C_in, C_out, kernel_size, stride, dilation, groups, slimmable=False
+        )
+        flops, params = profile(
+            layer, inputs=(torch.randn(1, C_in, h, w),), custom_ops=custom_ops
+        )
         return flops
-    
+
     @staticmethod
     def _latency(h, w, C_in, C_out, kernel_size=3, stride=1, dilation=1, groups=1):
-        layer = Conv3x3(C_in, C_out, kernel_size, stride, dilation, groups, slimmable=False)
+        layer = Conv3x3(
+            C_in, C_out, kernel_size, stride, dilation, groups, slimmable=False
+        )
         latency = compute_latency(layer, (1, C_in, h, w))
         return latency
 
     def forward_latency(self, size):
         c_in, h_in, w_in = size
         if self.slimmable:
-            assert c_in == make_divisible(self.C_in * self.ratio[0]), "c_in %d, int(self.C_in * self.ratio[0]) %d"%(c_in, int(self.C_in * self.ratio[0]))
+            assert c_in == make_divisible(
+                self.C_in * self.ratio[0]
+            ), "c_in %d, int(self.C_in * self.ratio[0]) %d" % (
+                c_in,
+                int(self.C_in * self.ratio[0]),
+            )
             c_out = make_divisible(self.C_out * self.ratio[1])
         else:
-            assert c_in == self.C_in, "c_in %d, self.C_in %d"%(c_in, self.C_in)
+            assert c_in == self.C_in, "c_in %d, self.C_in %d" % (c_in, self.C_in)
             c_out = self.C_out
         if self.stride == 1:
-            h_out = h_in; w_out = w_in
+            h_out = h_in
+            w_out = w_in
         else:
-            h_out = h_in // 2; w_out = w_in // 2
-        name = "Conv3x3_H%d_W%d_Cin%d_Cout%d_stride%d_dilation%d"%(h_in, w_in, c_in, c_out, self.stride, self.dilation)
+            h_out = h_in // 2
+            w_out = w_in // 2
+        name = "Conv3x3_H%d_W%d_Cin%d_Cout%d_stride%d_dilation%d" % (
+            h_in,
+            w_in,
+            c_in,
+            c_out,
+            self.stride,
+            self.dilation,
+        )
         if name in latency_lookup_table:
             latency = latency_lookup_table[name]
         else:
             print("not found in latency_lookup_table:", name)
-            latency = Conv3x3._latency(h_in, w_in, c_in, c_out, self.kernel_size, self.stride, self.dilation, self.groups)
+            latency = Conv3x3._latency(
+                h_in,
+                w_in,
+                c_in,
+                c_out,
+                self.kernel_size,
+                self.stride,
+                self.dilation,
+                self.groups,
+            )
             latency_lookup_table[name] = latency
             np.save(table_file_name, latency_lookup_table)
         return latency, (c_out, h_out, w_out)
 
-
     def forward_flops(self, size, quantize=False):
         c_in, h_in, w_in = size
         if self.slimmable:
-            assert c_in == make_divisible(self.C_in * self.ratio[0]), "c_in %d, self.C_in * self.ratio[0] %d"%(c_in, self.C_in * self.ratio[0])
+            assert c_in == make_divisible(
+                self.C_in * self.ratio[0]
+            ), "c_in %d, self.C_in * self.ratio[0] %d" % (
+                c_in,
+                self.C_in * self.ratio[0],
+            )
             c_out = make_divisible(self.C_out * self.ratio[1])
         else:
-            assert c_in == self.C_in, "c_in %d, self.C_in %d"%(c_in, self.C_in)
+            assert c_in == self.C_in, "c_in %d, self.C_in %d" % (c_in, self.C_in)
             c_out = self.C_out
         if self.stride == 1:
-            h_out = h_in; w_out = w_in
+            h_out = h_in
+            w_out = w_in
         else:
-            h_out = h_in // 2; w_out = w_in // 2
-        name = "Conv3x3_H%d_W%d_Cin%d_Cout%d_kernel%d_stride%d"%(h_in, w_in, c_in, c_out, self.kernel_size, self.stride)
+            h_out = h_in // 2
+            w_out = w_in // 2
+        name = "Conv3x3_H%d_W%d_Cin%d_Cout%d_kernel%d_stride%d" % (
+            h_in,
+            w_in,
+            c_in,
+            c_out,
+            self.kernel_size,
+            self.stride,
+        )
         if name in flops_lookup_table:
             flops = flops_lookup_table[name]
         else:
             print("not found in flops_lookup_table:", name)
-            flops = Conv3x3._flops(h_in, w_in, c_in, c_out, self.kernel_size, self.stride, self.dilation, self.groups)
+            flops = Conv3x3._flops(
+                h_in,
+                w_in,
+                c_in,
+                c_out,
+                self.kernel_size,
+                self.stride,
+                self.dilation,
+                self.groups,
+            )
             flops_lookup_table[name] = flops
             np.save(table_file_name, flops_lookup_table)
         # if quantize:
@@ -571,9 +1159,8 @@ class Conv3x3(nn.Module):
 
         return flops, (c_out, h_out, w_out)
 
-
     def forward(self, x, quantize=False):
-        identity = x
+        # identity = x
         out = self.conv1(x, quantize=quantize)
         out = self.bn1(out)
         out = self.relu(out)
@@ -581,7 +1168,17 @@ class Conv3x3(nn.Module):
 
 
 class BasicResidual(nn.Module):
-    def __init__(self, C_in, C_out, kernel_size=3, stride=1, dilation=1, groups=1, slimmable=True, width_mult_list=[1.]):
+    def __init__(
+        self,
+        C_in,
+        C_out,
+        kernel_size=3,
+        stride=1,
+        dilation=1,
+        groups=1,
+        slimmable=True,
+        width_mult_list=[1.0],
+    ):
         super(BasicResidual, self).__init__()
         # Both self.conv1 and self.downsample layers downsample the input when stride != 1
         self.C_in = C_in
@@ -593,32 +1190,90 @@ class BasicResidual(nn.Module):
         self.slimmable = slimmable
         self.width_mult_list = width_mult_list
         assert stride in [1, 2]
-        if self.stride == 2: self.dilation = 1
-        self.ratio = (1., 1.)
+        if self.stride == 2:
+            self.dilation = 1
+        self.ratio = (1.0, 1.0)
 
         self.relu = nn.ReLU(inplace=True)
 
         if self.slimmable:
-            self.conv1 = USConv2d(C_in, C_out, 3, stride, padding=dilation, dilation=dilation, groups=groups, bias=False, width_mult_list=width_mult_list)
+            self.conv1 = USConv2d(
+                C_in,
+                C_out,
+                3,
+                stride,
+                padding=dilation,
+                dilation=dilation,
+                groups=groups,
+                bias=False,
+                width_mult_list=width_mult_list,
+            )
             self.bn1 = USBatchNorm2d(C_out, width_mult_list)
-            self.conv2 = USConv2d(C_out, C_out, 3, 1, padding=dilation, dilation=dilation, groups=groups, bias=False, width_mult_list=width_mult_list)
+            self.conv2 = USConv2d(
+                C_out,
+                C_out,
+                3,
+                1,
+                padding=dilation,
+                dilation=dilation,
+                groups=groups,
+                bias=False,
+                width_mult_list=width_mult_list,
+            )
             self.bn2 = USBatchNorm2d(C_out, width_mult_list)
 
-            self.skip = USConv2d(C_in, C_out, 1, stride, padding=0, dilation=dilation, groups=1, bias=False, width_mult_list=width_mult_list)
+            self.skip = USConv2d(
+                C_in,
+                C_out,
+                1,
+                stride,
+                padding=0,
+                dilation=dilation,
+                groups=1,
+                bias=False,
+                width_mult_list=width_mult_list,
+            )
             self.bn3 = USBatchNorm2d(C_out, width_mult_list)
-       
+
         else:
-            self.conv1 = Conv2d(C_in, C_out, 3, stride, padding=dilation, dilation=dilation, groups=groups, bias=False)
+            self.conv1 = Conv2d(
+                C_in,
+                C_out,
+                3,
+                stride,
+                padding=dilation,
+                dilation=dilation,
+                groups=groups,
+                bias=False,
+            )
             # self.bn1 = nn.BatchNorm2d(C_out)
             self.bn1 = BatchNorm2d(C_out)
-            self.conv2 = Conv2d(C_out, C_out, 3, 1, padding=dilation, dilation=dilation, groups=groups, bias=False)
+            self.conv2 = Conv2d(
+                C_out,
+                C_out,
+                3,
+                1,
+                padding=dilation,
+                dilation=dilation,
+                groups=groups,
+                bias=False,
+            )
             # self.bn2 = nn.BatchNorm2d(C_out)
             self.bn2 = BatchNorm2d(C_out)
 
             if self.C_in != self.C_out or self.stride != 1:
-                self.skip = Conv2d(C_in, C_out, 1, stride, padding=0, dilation=dilation, groups=1, bias=False)
+                self.skip = Conv2d(
+                    C_in,
+                    C_out,
+                    1,
+                    stride,
+                    padding=0,
+                    dilation=dilation,
+                    groups=1,
+                    bias=False,
+                )
                 self.bn3 = BatchNorm2d(C_out)
-    
+
     def set_ratio(self, ratio):
         assert len(ratio) == 2
         self.ratio = ratio
@@ -627,19 +1282,25 @@ class BasicResidual(nn.Module):
         self.conv2.set_ratio((ratio[1], ratio[1]))
         self.bn2.set_ratio(ratio[1])
 
-        if hasattr(self, 'skip'):
+        if hasattr(self, "skip"):
             self.skip.set_ratio(ratio)
             self.bn3.set_ratio(ratio[1])
 
     @staticmethod
     def _flops(h, w, C_in, C_out, kernel_size=3, stride=1, dilation=1, groups=1):
-        layer = BasicResidual(C_in, C_out, kernel_size, stride, dilation, groups, slimmable=False)
-        flops, params = profile(layer, inputs=(torch.randn(1, C_in, h, w),), custom_ops=custom_ops)
+        layer = BasicResidual(
+            C_in, C_out, kernel_size, stride, dilation, groups, slimmable=False
+        )
+        flops, params = profile(
+            layer, inputs=(torch.randn(1, C_in, h, w),), custom_ops=custom_ops
+        )
         return flops
-    
+
     @staticmethod
     def _latency(h, w, C_in, C_out, kernel_size=3, stride=1, dilation=1, groups=1):
-        layer = BasicResidual(C_in, C_out, kernel_size, stride, dilation, groups, slimmable=False)
+        layer = BasicResidual(
+            C_in, C_out, kernel_size, stride, dilation, groups, slimmable=False
+        )
         latency = compute_latency(layer, (1, C_in, h, w))
         return latency
 
@@ -649,48 +1310,87 @@ class BasicResidual(nn.Module):
             assert c_in == make_divisible(self.C_in * self.ratio[0])
             c_out = make_divisible(self.C_out * self.ratio[1])
         else:
-            assert c_in == self.C_in, "c_in %d, self.C_in%d"%(c_in, self.C_in)
+            assert c_in == self.C_in, "c_in %d, self.C_in%d" % (c_in, self.C_in)
             c_out = self.C_out
         if self.stride == 1:
-            h_out = h_in; w_out = w_in
+            h_out = h_in
+            w_out = w_in
         else:
-            h_out = h_in // 2; w_out = w_in // 2
-        name = "BasicResidual_H%d_W%d_Cin%d_Cout%d_stride%d_dilation%d"%(h_in, w_in, c_in, c_out, self.stride, self.dilation)
+            h_out = h_in // 2
+            w_out = w_in // 2
+        name = "BasicResidual_H%d_W%d_Cin%d_Cout%d_stride%d_dilation%d" % (
+            h_in,
+            w_in,
+            c_in,
+            c_out,
+            self.stride,
+            self.dilation,
+        )
         if name in latency_lookup_table:
             latency = latency_lookup_table[name]
         else:
             print("not found in latency_lookup_table:", name)
-            latency = BasicResidual._latency(h_in, w_in, c_in, c_out, self.kernel_size, self.stride, self.dilation, self.groups)
+            latency = BasicResidual._latency(
+                h_in,
+                w_in,
+                c_in,
+                c_out,
+                self.kernel_size,
+                self.stride,
+                self.dilation,
+                self.groups,
+            )
             latency_lookup_table[name] = latency
             np.save(table_file_name, latency_lookup_table)
         return latency, (c_out, h_out, w_out)
 
-
     def forward_flops(self, size, quantize=False):
         c_in, h_in, w_in = size
         if self.slimmable:
-            assert c_in == make_divisible(self.C_in * self.ratio[0]), "c_in %d, self.C_in * self.ratio[0] %d"%(c_in, self.C_in * self.ratio[0])
+            assert c_in == make_divisible(
+                self.C_in * self.ratio[0]
+            ), "c_in %d, self.C_in * self.ratio[0] %d" % (
+                c_in,
+                self.C_in * self.ratio[0],
+            )
             c_out = make_divisible(self.C_out * self.ratio[1])
         else:
-            assert c_in == self.C_in, "c_in %d, self.C_in %d"%(c_in, self.C_in)
+            assert c_in == self.C_in, "c_in %d, self.C_in %d" % (c_in, self.C_in)
             c_out = self.C_out
         if self.stride == 1:
-            h_out = h_in; w_out = w_in
+            h_out = h_in
+            w_out = w_in
         else:
-            h_out = h_in // 2; w_out = w_in // 2
-        name = "BasicResidual_H%d_W%d_Cin%d_Cout%d_kernel%d_stride%d"%(h_in, w_in, c_in, c_out, self.kernel_size, self.stride)
+            h_out = h_in // 2
+            w_out = w_in // 2
+        name = "BasicResidual_H%d_W%d_Cin%d_Cout%d_kernel%d_stride%d" % (
+            h_in,
+            w_in,
+            c_in,
+            c_out,
+            self.kernel_size,
+            self.stride,
+        )
         if name in flops_lookup_table:
             flops = flops_lookup_table[name]
         else:
             print("not found in flops_lookup_table:", name)
-            flops = BasicResidual._flops(h_in, w_in, c_in, c_out, self.kernel_size, self.stride, self.dilation, self.groups)
+            flops = BasicResidual._flops(
+                h_in,
+                w_in,
+                c_in,
+                c_out,
+                self.kernel_size,
+                self.stride,
+                self.dilation,
+                self.groups,
+            )
             flops_lookup_table[name] = flops
             np.save(table_file_name, flops_lookup_table)
         # if quantize:
         #     flops /= 4
 
         return flops, (c_out, h_out, w_out)
-
 
     def forward(self, x, quantize=False):
         identity = x
@@ -700,9 +1400,9 @@ class BasicResidual(nn.Module):
         out = self.conv2(out, quantize=quantize)
         out = self.bn2(out)
 
-        if hasattr(self, 'skip'):
+        if hasattr(self, "skip"):
             identity = self.bn3(self.skip(identity, quantize=quantize))
-            
+
         out += identity
         out = self.relu(out)
 
@@ -710,22 +1410,30 @@ class BasicResidual(nn.Module):
 
 
 class SkipConnect(nn.Module):
-    def __init__(self, C_in, C_out, stride=1, slimmable=True, width_mult_list=[1.]):
+    def __init__(self, C_in, C_out, stride=1, slimmable=True, width_mult_list=[1.0]):
         super(SkipConnect, self).__init__()
         assert stride in [1, 2]
-        assert C_out % 2 == 0, 'C_out=%d'%C_out
+        assert C_out % 2 == 0, "C_out=%d" % C_out
         self.C_in = C_in
         self.C_out = C_out
         self.stride = stride
         self.slimmable = slimmable
         self.width_mult_list = width_mult_list
-        self.ratio = (1., 1.)
+        self.ratio = (1.0, 1.0)
 
         self.kernel_size = 1
         self.padding = 0
 
         if slimmable:
-            self.conv = USConv2d(C_in, C_out, 1, stride=stride, padding=0, bias=False, width_mult_list=width_mult_list)
+            self.conv = USConv2d(
+                C_in,
+                C_out,
+                1,
+                stride=stride,
+                padding=0,
+                bias=False,
+                width_mult_list=width_mult_list,
+            )
             self.bn = USBatchNorm2d(C_out, width_mult_list)
             self.relu = nn.ReLU(inplace=True)
 
@@ -735,7 +1443,6 @@ class SkipConnect(nn.Module):
             self.bn = BatchNorm2d(C_out)
             self.relu = nn.ReLU(inplace=True)
 
-
     def set_ratio(self, ratio):
         assert len(ratio) == 2
 
@@ -743,11 +1450,12 @@ class SkipConnect(nn.Module):
         self.conv.set_ratio(ratio)
         self.bn.set_ratio(ratio[1])
 
-
     @staticmethod
     def _flops(h, w, C_in, C_out, stride=1):
         layer = SkipConnect(C_in, C_out, stride, slimmable=False)
-        flops, params = profile(layer, inputs=(torch.randn(1, C_in, h, w),), custom_ops=custom_ops)
+        flops, params = profile(
+            layer, inputs=(torch.randn(1, C_in, h, w),), custom_ops=custom_ops
+        )
         return flops
 
     @staticmethod
@@ -765,10 +1473,18 @@ class SkipConnect(nn.Module):
             assert c_in == self.C_in
             c_out = self.C_out
         if self.stride == 1:
-            h_out = h_in; w_out = w_in
+            h_out = h_in
+            w_out = w_in
         else:
-            h_out = h_in // 2; w_out = w_in // 2
-        name = "SkipConnect_H%d_W%d_Cin%d_Cout%d_stride%d"%(h_in, w_in, c_in, c_out, self.stride)
+            h_out = h_in // 2
+            w_out = w_in // 2
+        name = "SkipConnect_H%d_W%d_Cin%d_Cout%d_stride%d" % (
+            h_in,
+            w_in,
+            c_in,
+            c_out,
+            self.stride,
+        )
         if name in latency_lookup_table:
             latency = latency_lookup_table[name]
         else:
@@ -778,20 +1494,32 @@ class SkipConnect(nn.Module):
             np.save(table_file_name, latency_lookup_table)
         return latency, (c_out, h_out, w_out)
 
-
     def forward_flops(self, size, quantize=False):
         c_in, h_in, w_in = size
         if self.slimmable:
-            assert c_in == make_divisible(self.C_in * self.ratio[0]), "c_in %d, self.C_in * self.ratio[0] %d"%(c_in, self.C_in * self.ratio[0])
+            assert c_in == make_divisible(
+                self.C_in * self.ratio[0]
+            ), "c_in %d, self.C_in * self.ratio[0] %d" % (
+                c_in,
+                self.C_in * self.ratio[0],
+            )
             c_out = make_divisible(self.C_out * self.ratio[1])
         else:
-            assert c_in == self.C_in, "c_in %d, self.C_in %d"%(c_in, self.C_in)
+            assert c_in == self.C_in, "c_in %d, self.C_in %d" % (c_in, self.C_in)
             c_out = self.C_out
         if self.stride == 1:
-            h_out = h_in; w_out = w_in
+            h_out = h_in
+            w_out = w_in
         else:
-            h_out = h_in // 2; w_out = w_in // 2
-        name = "SkipConnect_H%d_W%d_Cin%d_Cout%d_stride%d"%(h_in, w_in, c_in, c_out, self.stride)
+            h_out = h_in // 2
+            w_out = w_in // 2
+        name = "SkipConnect_H%d_W%d_Cin%d_Cout%d_stride%d" % (
+            h_in,
+            w_in,
+            c_in,
+            c_out,
+            self.stride,
+        )
         if name in flops_lookup_table:
             flops = flops_lookup_table[name]
         else:
@@ -804,9 +1532,8 @@ class SkipConnect(nn.Module):
 
         return flops, (c_out, h_out, w_out)
 
-
     def forward(self, x, quantize=False):
-        if hasattr(self, 'conv'):
+        if hasattr(self, "conv"):
             out = self.conv(x, quantize=quantize)
             out = self.bn(out)
             out = self.relu(out)
@@ -817,7 +1544,17 @@ class SkipConnect(nn.Module):
 
 
 class DwsBlock(nn.Module):
-    def __init__(self, C_in, C_out, kernel_size=3, stride=1, dilation=1, groups=1, slimmable=True, width_mult_list=[1.]):
+    def __init__(
+        self,
+        C_in,
+        C_out,
+        kernel_size=3,
+        stride=1,
+        dilation=1,
+        groups=1,
+        slimmable=True,
+        width_mult_list=[1.0],
+    ):
         super(DwsBlock, self).__init__()
         # Both self.conv1 and self.downsample layers downsample the input when stride != 1
         self.C_in = C_in
@@ -829,26 +1566,64 @@ class DwsBlock(nn.Module):
         self.slimmable = slimmable
         self.width_mult_list = width_mult_list
         assert stride in [1, 2]
-        if self.stride == 2: self.dilation = 1
-        self.ratio = (1., 1.)
+        if self.stride == 2:
+            self.dilation = 1
+        self.ratio = (1.0, 1.0)
 
         self.relu = nn.ReLU(inplace=True)
 
         if self.slimmable:
-            self.conv1 = USConv2d(C_in, C_in, 3, stride, padding=dilation, dilation=dilation, groups=C_in, bias=False, width_mult_list=width_mult_list)
+            self.conv1 = USConv2d(
+                C_in,
+                C_in,
+                3,
+                stride,
+                padding=dilation,
+                dilation=dilation,
+                groups=C_in,
+                bias=False,
+                width_mult_list=width_mult_list,
+            )
             self.bn1 = USBatchNorm2d(C_out, width_mult_list)
 
-            self.conv2 = USConv2d(C_in, C_out, 1, 1, padding=0, dilation=dilation, groups=groups, bias=False, width_mult_list=width_mult_list)
+            self.conv2 = USConv2d(
+                C_in,
+                C_out,
+                1,
+                1,
+                padding=0,
+                dilation=dilation,
+                groups=groups,
+                bias=False,
+                width_mult_list=width_mult_list,
+            )
             self.bn2 = USBatchNorm2d(C_out, width_mult_list)
-       
+
         else:
-            self.conv1 = Conv2d(C_in, C_in, 3, stride, padding=dilation, dilation=dilation, groups=C_in, bias=False)
+            self.conv1 = Conv2d(
+                C_in,
+                C_in,
+                3,
+                stride,
+                padding=dilation,
+                dilation=dilation,
+                groups=C_in,
+                bias=False,
+            )
             self.bn1 = BatchNorm2d(C_out)
 
-            self.conv2 = Conv2d(C_in, C_out, 1, 1, padding=0, dilation=dilation, groups=groups, bias=False)
+            self.conv2 = Conv2d(
+                C_in,
+                C_out,
+                1,
+                1,
+                padding=0,
+                dilation=dilation,
+                groups=groups,
+                bias=False,
+            )
             self.bn2 = BatchNorm2d(C_out)
 
-    
     def set_ratio(self, ratio):
         assert len(ratio) == 2
         self.ratio = ratio
@@ -857,16 +1632,21 @@ class DwsBlock(nn.Module):
         self.conv2.set_ratio(ratio)
         self.bn2.set_ratio(ratio[1])
 
-
     @staticmethod
     def _flops(h, w, C_in, C_out, kernel_size=3, stride=1, dilation=1, groups=1):
-        layer = DwsBlock(C_in, C_out, kernel_size, stride, dilation, groups=1, slimmable=False)
-        flops, params = profile(layer, inputs=(torch.randn(1, C_in, h, w),), custom_ops=custom_ops)
+        layer = DwsBlock(
+            C_in, C_out, kernel_size, stride, dilation, groups=1, slimmable=False
+        )
+        flops, params = profile(
+            layer, inputs=(torch.randn(1, C_in, h, w),), custom_ops=custom_ops
+        )
         return flops
-    
+
     @staticmethod
     def _latency(h, w, C_in, C_out, kernel_size=3, stride=1, dilation=1, groups=1):
-        layer = DwsBlock(C_in, C_out, kernel_size, stride, dilation, groups, slimmable=False)
+        layer = DwsBlock(
+            C_in, C_out, kernel_size, stride, dilation, groups, slimmable=False
+        )
         latency = compute_latency(layer, (1, C_in, h, w))
         return latency
 
@@ -877,19 +1657,36 @@ class DwsBlock(nn.Module):
         else:
             c_out = self.C_out
         if self.stride == 1:
-            h_out = h_in; w_out = w_in
+            h_out = h_in
+            w_out = w_in
         else:
-            h_out = h_in // 2; w_out = w_in // 2
-        name = "DwsBlock_H%d_W%d_Cin%d_Cout%d_stride%d_dilation%d"%(h_in, w_in, c_in, c_out, self.stride, self.dilation)
+            h_out = h_in // 2
+            w_out = w_in // 2
+        name = "DwsBlock_H%d_W%d_Cin%d_Cout%d_stride%d_dilation%d" % (
+            h_in,
+            w_in,
+            c_in,
+            c_out,
+            self.stride,
+            self.dilation,
+        )
         if name in latency_lookup_table:
             latency = latency_lookup_table[name]
         else:
             print("not found in latency_lookup_table:", name)
-            latency = DwsBlock._latency(h_in, w_in, c_in, c_out, self.kernel_size, self.stride, self.dilation, self.groups)
+            latency = DwsBlock._latency(
+                h_in,
+                w_in,
+                c_in,
+                c_out,
+                self.kernel_size,
+                self.stride,
+                self.dilation,
+                self.groups,
+            )
             latency_lookup_table[name] = latency
             np.save(table_file_name, latency_lookup_table)
         return latency, (c_out, h_out, w_out)
-
 
     def forward_flops(self, size, quantize=False):
         c_in, h_in, w_in = size
@@ -898,15 +1695,33 @@ class DwsBlock(nn.Module):
         else:
             c_out = self.C_out
         if self.stride == 1:
-            h_out = h_in; w_out = w_in
+            h_out = h_in
+            w_out = w_in
         else:
-            h_out = h_in // 2; w_out = w_in // 2
-        name = "DwsBlock_H%d_W%d_Cin%d_Cout%d_kernel%d_stride%d"%(h_in, w_in, c_in, c_out, self.kernel_size, self.stride)
+            h_out = h_in // 2
+            w_out = w_in // 2
+        name = "DwsBlock_H%d_W%d_Cin%d_Cout%d_kernel%d_stride%d" % (
+            h_in,
+            w_in,
+            c_in,
+            c_out,
+            self.kernel_size,
+            self.stride,
+        )
         if name in flops_lookup_table:
             flops = flops_lookup_table[name]
         else:
             print("not found in flops_lookup_table:", name)
-            flops = DwsBlock._flops(h_in, w_in, c_in, c_out, self.kernel_size, self.stride, self.dilation, self.groups)
+            flops = DwsBlock._flops(
+                h_in,
+                w_in,
+                c_in,
+                c_out,
+                self.kernel_size,
+                self.stride,
+                self.dilation,
+                self.groups,
+            )
             flops_lookup_table[name] = flops
             np.save(table_file_name, flops_lookup_table)
         # if quantize:
@@ -915,9 +1730,8 @@ class DwsBlock(nn.Module):
 
         return flops, (c_out, h_out, w_out)
 
-
     def forward(self, x, quantize=False):
-        identity = x
+        # identity = x
         out = self.conv1(x, quantize=False)
         out = self.bn1(out)
         out = self.relu(out)
@@ -929,11 +1743,52 @@ class DwsBlock(nn.Module):
 
 
 OPS = {
-    'skip' : lambda C_in, C_out, stride, slimmable, width_mult_list: SkipConnect(C_in, C_out, stride, slimmable, width_mult_list),
-    'conv3x3' : lambda C_in, C_out, stride, slimmable, width_mult_list: Conv3x3(C_in, C_out, kernel_size=3, stride=stride, dilation=1, slimmable=slimmable, width_mult_list=width_mult_list),
-    'conv3x3_d2' : lambda C_in, C_out, stride, slimmable, width_mult_list: Conv3x3(C_in, C_out, kernel_size=3, stride=stride, dilation=2, slimmable=slimmable, width_mult_list=width_mult_list),
-    'conv3x3_d4' : lambda C_in, C_out, stride, slimmable, width_mult_list: Conv3x3(C_in, C_out, kernel_size=3, stride=stride, dilation=4, slimmable=slimmable, width_mult_list=width_mult_list),
-    'residual' : lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual(C_in, C_out, kernel_size=3, stride=stride, dilation=1, slimmable=slimmable, width_mult_list=width_mult_list),
-    'dwsblock' : lambda C_in, C_out, stride, slimmable, width_mult_list: DwsBlock(C_in, C_out, kernel_size=3, stride=stride, dilation=1, slimmable=slimmable, width_mult_list=width_mult_list),
+    "skip": lambda C_in, C_out, stride, slimmable, width_mult_list: SkipConnect(
+        C_in, C_out, stride, slimmable, width_mult_list
+    ),
+    "conv3x3": lambda C_in, C_out, stride, slimmable, width_mult_list: Conv3x3(
+        C_in,
+        C_out,
+        kernel_size=3,
+        stride=stride,
+        dilation=1,
+        slimmable=slimmable,
+        width_mult_list=width_mult_list,
+    ),
+    "conv3x3_d2": lambda C_in, C_out, stride, slimmable, width_mult_list: Conv3x3(
+        C_in,
+        C_out,
+        kernel_size=3,
+        stride=stride,
+        dilation=2,
+        slimmable=slimmable,
+        width_mult_list=width_mult_list,
+    ),
+    "conv3x3_d4": lambda C_in, C_out, stride, slimmable, width_mult_list: Conv3x3(
+        C_in,
+        C_out,
+        kernel_size=3,
+        stride=stride,
+        dilation=4,
+        slimmable=slimmable,
+        width_mult_list=width_mult_list,
+    ),
+    "residual": lambda C_in, C_out, stride, slimmable, width_mult_list: BasicResidual(
+        C_in,
+        C_out,
+        kernel_size=3,
+        stride=stride,
+        dilation=1,
+        slimmable=slimmable,
+        width_mult_list=width_mult_list,
+    ),
+    "dwsblock": lambda C_in, C_out, stride, slimmable, width_mult_list: DwsBlock(
+        C_in,
+        C_out,
+        kernel_size=3,
+        stride=stride,
+        dilation=1,
+        slimmable=slimmable,
+        width_mult_list=width_mult_list,
+    ),
 }
-

@@ -1,6 +1,6 @@
 .venv
 .micromamba
-**/__pycache__/
+**/__pycache__
 **/ckpt/
 **/.ipynb_checkpoints
 **/.mypy_cache
@@ -12,3 +12,4 @@ AGD_SR/search/ESRGAN/
 AGD_ST/search/output/*
 
 *.tar.gz*
+*_lookup_table.npy
