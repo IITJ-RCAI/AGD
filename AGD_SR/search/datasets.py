@@ -13,7 +13,9 @@ class ImageDataset(Dataset):
         self.transform = transforms.Compose(transforms_)
         self._portion = portion
 
-        self.files_A_total = sorted((x for x in root.rglob("*") if x.suffix in ['.png', '.jpg', '.jpeg']))
+        self.files_A_total = sorted(
+            (x for x in root.rglob("*") if x.suffix in [".png", ".jpg", ".jpeg"])
+        )
 
         if self._portion is not None:
             num_files_A = len(self.files_A_total)

@@ -50,39 +50,47 @@ def get_colors(class_num):
 
 
 def get_ade_colors():
-    colors = sio.loadmat('./color150.mat')['colors']
-    colors = colors[:, ::-1, ]
+    colors = sio.loadmat("./color150.mat")["colors"]
+    colors = colors[
+        :,
+        ::-1,
+    ]
     colors = np.array(colors).astype(int).tolist()
     colors.insert(0, [0, 0, 0])
 
     return colors
 
 
-def print_iou(iu, mean_pixel_acc, class_names=None, show_no_back=False,
-              no_print=False):
+def print_iou(iu, mean_pixel_acc, class_names=None, show_no_back=False, no_print=False):
     n = iu.size
     lines = []
     for i in range(n):
         if class_names is None:
-            cls = 'Class %d:' % (i + 1)
+            cls = "Class %d:" % (i + 1)
         else:
-            cls = '%d %s' % (i + 1, class_names[i])
-        lines.append('%-8s\t%.3f%%' % (cls, iu[i] * 100))
+            cls = "%d %s" % (i + 1, class_names[i])
+        lines.append("%-8s\t%.3f%%" % (cls, iu[i] * 100))
     mean_IU = np.nanmean(iu)
     # mean_IU_no_back = np.nanmean(iu[1:])
     mean_IU_no_back = np.nanmean(iu[:-1])
     if show_no_back:
         lines.append(
-            '----------------------------     %-8s\t%.3f%%\t%-8s\t%.3f%%\t%-8s\t%.3f%%' % (
-                'mean_IU', mean_IU * 100, 'mean_IU_no_back',
+            "----------------------------     %-8s\t%.3f%%\t%-8s\t%.3f%%\t%-8s\t%.3f%%"
+            % (
+                "mean_IU",
+                mean_IU * 100,
+                "mean_IU_no_back",
                 mean_IU_no_back * 100,
-                'mean_pixel_ACC', mean_pixel_acc * 100))
+                "mean_pixel_ACC",
+                mean_pixel_acc * 100,
+            )
+        )
     else:
         print(mean_pixel_acc)
         lines.append(
-            '----------------------------     %-8s\t%.3f%%\t%-8s\t%.3f%%' % (
-                'mean_IU', mean_IU * 100, 'mean_pixel_ACC',
-                mean_pixel_acc * 100))
+            "----------------------------     %-8s\t%.3f%%\t%-8s\t%.3f%%"
+            % ("mean_IU", mean_IU * 100, "mean_pixel_ACC", mean_pixel_acc * 100)
+        )
     line = "\n".join(lines)
     if not no_print:
         print(line)

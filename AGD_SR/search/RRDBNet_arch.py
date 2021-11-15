@@ -36,7 +36,7 @@ class ResidualDenseBlock_5C(nn.Module):
 
 
 class RRDB(nn.Module):
-    '''Residual in Residual Dense Block'''
+    """Residual in Residual Dense Block"""
 
     def __init__(self, nf, gc=32):
         super(RRDB, self).__init__()
@@ -72,15 +72,18 @@ class RRDBNet(nn.Module):
         trunk = self.trunk_conv(self.RRDB_trunk(fea))
         fea = fea + trunk
 
-        fea = self.lrelu(self.upconv1(F.interpolate(fea, scale_factor=2, mode='nearest')))
-        fea = self.lrelu(self.upconv2(F.interpolate(fea, scale_factor=2, mode='nearest')))
+        fea = self.lrelu(
+            self.upconv1(F.interpolate(fea, scale_factor=2, mode="nearest"))
+        )
+        fea = self.lrelu(
+            self.upconv2(F.interpolate(fea, scale_factor=2, mode="nearest"))
+        )
         out = self.conv_last(self.lrelu(self.HRconv(fea)))
 
         return out
 
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     model = RRDBNet(3, 3, 64, 23, gc=32)
     flops, params = profile(model, inputs=(torch.randn(1, 3, 510, 350),))
-    print('flops:', flops, 'params:', params)
+    print("flops:", flops, "params:", params)

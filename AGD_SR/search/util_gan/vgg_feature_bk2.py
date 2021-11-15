@@ -1,6 +1,7 @@
 from torchvision.models.vgg import vgg16
 import torch.nn as nn
 
+
 class VGGFeature(nn.Module):
     def __init__(self):
         super(VGGFeature, self).__init__()
@@ -10,7 +11,7 @@ class VGGFeature(nn.Module):
         for param in self.loss_network.parameters():
             param.requires_grad = False
 
-    def __call__(self,x):
+    def __call__(self, x):
         x = x.clone()
         x_vgg = self.loss_network(x)
         return x_vgg

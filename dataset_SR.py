@@ -50,7 +50,7 @@ for l in links:
 extract_images(data_root)
 # Download eval data
 gdown.cached_download(
-    'http://vllab.ucmerced.edu/wlai24/LapSRN/results/SR_testing_datasets.zip',
-    str(data_root / 'eval' / 'SR_eval.zip'),
-    postprocess=gdown.extractall
+    "http://vllab.ucmerced.edu/wlai24/LapSRN/results/SR_testing_datasets.zip",
+    str(data_root / "eval" / "SR_eval.zip"),
+    postprocess=gdown.extractall,
 )

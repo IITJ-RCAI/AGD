@@ -1,63 +1,59 @@
 from __future__ import division
-import os
-import sys
-import time
+
+import datetime
 import glob
 import logging
-from tqdm import tqdm
+import os
+import pathlib
+import sys
 
-import torch
-import torch.nn as nn
-import torch.utils
-import torch.nn.functional as F
-import torch.backends.cudnn as cudnn
-import torchvision.transforms as transforms
-from torch.utils.data import DataLoader
-from torch.autograd import Variable
-
-import time
-
-from tensorboardX import SummaryWriter
-
-from torchvision.utils import save_image
-
-import numpy as np
 import matplotlib
+import numpy as np
+import torch
+
+# import torch.backends.cudnn as cudnn
+import torch.nn as nn
+
+# import torch.nn.functional as F
+import torch.utils
+import torchvision.transforms as transforms
+
+# from matplotlib import pyplot as plt
+# from PIL import Image
+from tensorboardX import SummaryWriter
+from torch.autograd import Variable
+from torch.utils.data import DataLoader
+
+# from torchsummary import summary
+from torchvision.utils import save_image
+from tqdm import tqdm
+from utils.darts_utils import (  # objective_acc_lat,; plot_op,; plot_path_width,
+    create_exp_dir,
+    save,
+)
+
+import model_infer
+import model_search
+import operations
+import wandb
+from architect import Architect
+from config_search import config
+from datasets import ImageDataset
+from model_infer import NAS_GAN_Infer
+from model_search import NAS_GAN as Network
+from RRDBNet_arch import RRDBNet
+
+# from util_gan.cyclegan import Generator
+from util_gan.lr import LambdaLR
+from util_gan.psnr import compute_psnr
+
+# import time
+
+# from utils.init_func import init_weight
+
 
 # Force matplotlib to not use any Xwindows backend.
 matplotlib.use("Agg")
-from matplotlib import pyplot as plt
-from PIL import Image
-
-from config_search import config
-from datasets import ImageDataset
-
-from utils.init_func import init_weight
-
-from architect import Architect
-from utils.darts_utils import (
-    create_exp_dir,
-    save,
-    plot_op,
-    plot_path_width,
-    objective_acc_lat,
-)
-from model_search import NAS_GAN as Network
-from model_infer import NAS_GAN_Infer
-
-from util_gan.cyclegan import Generator
-from util_gan.psnr import compute_psnr
-from util_gan.lr import LambdaLR
-
-from RRDBNet_arch import RRDBNet
-from torchsummary import summary
-
-import operations
-import model_search
-import model_infer
-import wandb
-import datetime
-import pathlib
 
 operations.ENABLE_BN = config.ENABLE_BN
 model_search.ENABLE_TANH = model_infer.ENABLE_TANH = config.ENABLE_TANH
@@ -114,7 +110,7 @@ def main(pretrain=True):
 
     assert type(pretrain) == bool or type(pretrain) == str
     update_arch = True
-    if pretrain == True:
+    if pretrain is True:
         update_arch = False
     logging.info("args = %s", str(config))
     # preparation ################
@@ -193,7 +189,7 @@ def main(pretrain=True):
         sys.exit()
 
     # lr policy ##############################
-    total_iteration = config.nepochs * config.niters_per_epoch
+    total_iteration = config.nepochs * config.niters_per_epoch  # noqa:F841
 
     if config.lr_schedule == "linear":
         lr_policy = torch.optim.lr_scheduler.LambdaLR(
