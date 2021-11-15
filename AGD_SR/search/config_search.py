@@ -33,7 +33,10 @@ C.link_val_log_file = C.log_dir + '/val_last.log'
 
 """Data Dir and Weight Dir"""
 # C.dataset_path = "/home/yf22/dataset/DIV2K_bibubic"
-C.dataset_path = "/data4/low_res2"
+C.dataset_path_train = "./../../dataset/super_resolution/div2k/DIV2K_train_LR_bicubic/X4_sub"
+C.dataset_path_train_hr = "./../../dataset/super_resolution/div2k/DIV2K_train_HR"
+C.dataset_path_val = "./../../dataset/super_resolution/div2k/DIV2K_valid_LR_bicubic/X4"
+C.dataset_path_val_hr = "./../../dataset/super_resolution/div2k/DIV2K_valid_HR"
 
 """Path Config"""
 def add_path(path):

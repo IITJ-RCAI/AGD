@@ -23,8 +23,9 @@ from torchvision.utils import save_image
 
 import numpy as np
 import matplotlib
+
 # Force matplotlib to not use any Xwindows backend.
-matplotlib.use('Agg')
+matplotlib.use("Agg")
 from matplotlib import pyplot as plt
 from PIL import Image
 
@@ -34,7 +35,13 @@ from datasets import ImageDataset
 from utils.init_func import init_weight
 
 from architect import Architect
-from utils.darts_utils import create_exp_dir, save, plot_op, plot_path_width, objective_acc_lat
+from utils.darts_utils import (
+    create_exp_dir,
+    save,
+    plot_op,
+    plot_path_width,
+    objective_acc_lat,
+)
 from model_search import NAS_GAN as Network
 from model_infer import NAS_GAN_Infer
 
@@ -43,22 +50,65 @@ from util_gan.psnr import compute_psnr
 from util_gan.lr import LambdaLR
 
 from RRDBNet_arch import RRDBNet
+from torchsummary import summary
 
 import operations
 import model_search
 import model_infer
+import wandb
+import datetime
+import pathlib
+
 operations.ENABLE_BN = config.ENABLE_BN
 model_search.ENABLE_TANH = model_infer.ENABLE_TANH = config.ENABLE_TANH
 
 
 def main(pretrain=True):
-    config.save = 'ckpt/{}'.format(config.save)
-    create_exp_dir(config.save, scripts_to_save=glob.glob('*.py')+glob.glob('*.sh'))
+    # load env configs
+    config.USE_MAESTRO = os.environ.get("USE_MAESTRO", "0") == "1"
+    config.TEST_RUN = os.environ.get("TEST_RUN", "0") == "1"
+    if config.TEST_RUN is True:
+        logging.info("Running in TEST_RUN mode for 2 epochs.")
+        config.nepochs = 2
+        config.eval_epoch = 1
+        config.decay_epoch = 1
+        config.niters_per_epoch = 2
+    try:
+        config.seed = int(os.environ.get("RNG_SEED", "12345"))
+    except Exception:
+        print("WARNING USING 'NONE' SEED AS 'RNG_SEED' WAS NOT INTEGER...!!!")
+        config.seed = None
+    config.pretrain = pretrain
+    config.stage = "pretrain" if pretrain is True else "search"
+    config.dataset = config.dataset_path_train.split("/")[-2]
+
+    # wandb run
+    wandb.init(
+        project="AGD_SR_Maestro",
+        name=f"{config.dataset}-{config.stage}-{'with' if config.USE_MAESTRO is True else 'without'}_maestro",
+        tags=[config.dataset, "AGD", config.stage]
+        + (["maestro"] if config.USE_MAESTRO is True else []),
+        entity="rcai",
+        group=os.environ.get("WANDB_GROUP", None) or f"AGD_Maestro ({datetime.now()})",
+        job_type=f"Stage {config.stage}",
+        reinit=True,
+        sync_tensorboard=True,
+        save_code=True,
+        mode="disabled" if config.TEST_RUN is True else "online",
+    )
+
+    config.save = "ckpt/{}".format(config.save)
+    create_exp_dir(config.save, scripts_to_save=glob.glob("*.py") + glob.glob("*.sh"))
     logger = SummaryWriter(config.save)
 
-    log_format = '%(asctime)s %(message)s'
-    logging.basicConfig(stream=sys.stdout, level=logging.INFO, format=log_format, datefmt='%m/%d %I:%M:%S %p')
-    fh = logging.FileHandler(os.path.join(config.save, 'log.txt'))
+    log_format = "%(asctime)s %(message)s"
+    logging.basicConfig(
+        stream=sys.stdout,
+        level=logging.INFO,
+        format=log_format,
+        datefmt="%m/%d %I:%M:%S %p",
+    )
+    fh = logging.FileHandler(os.path.join(config.save, "log.txt"))
     fh.setFormatter(logging.Formatter(log_format))
     logging.getLogger().addHandler(fh)
 
@@ -77,8 +127,18 @@ def main(pretrain=True):
         torch.cuda.manual_seed(seed)
 
     # Model #######################################
-    model = Network(config.num_cell, config.op_per_cell, slimmable=config.slimmable, width_mult_list=config.width_mult_list, loss_weight=config.loss_weight, 
-                    prun_modes=config.prun_modes, loss_func=config.loss_func, before_act=config.before_act, quantize=config.quantize)
+    model = Network(
+        config.num_cell,
+        config.op_per_cell,
+        slimmable=config.slimmable,
+        width_mult_list=config.width_mult_list,
+        loss_weight=config.loss_weight,
+        prun_modes=config.prun_modes,
+        loss_func=config.loss_func,
+        before_act=config.before_act,
+        quantize=config.quantize,
+    )
+    # summary(model.cuda(), (3, 510, 350))
     model = torch.nn.DataParallel(model).cuda()
 
     # print(model)
@@ -94,11 +154,15 @@ def main(pretrain=True):
     if type(pretrain) == str:
         partial = torch.load(pretrain + "/weights.pt")
         state = model.state_dict()
-        pretrained_dict = {k: v for k, v in partial.items() if k in state and state[k].size() == partial[k].size()}
+        pretrained_dict = {
+            k: v
+            for k, v in partial.items()
+            if k in state and state[k].size() == partial[k].size()
+        }
         state.update(pretrained_dict)
         model.load_state_dict(state)
     # else:
-    #     features = [model.module.cells, model.module.conv_first, model.module.trunk_conv, model.module.upconv1, 
+    #     features = [model.module.cells, model.module.conv_first, model.module.trunk_conv, model.module.upconv1,
     #                 model.module.upconv2, model.module.HRconv, model.module.conv_last]
     #     init_weight(features, nn.init.kaiming_normal_, nn.BatchNorm2d, config.bn_eps, config.bn_momentum, mode='fan_in', nonlinearity='relu')
 
@@ -115,138 +179,243 @@ def main(pretrain=True):
     parameters += list(model.module.HRconv.parameters())
     parameters += list(model.module.conv_last.parameters())
 
-    if config.opt == 'Adam':
-        optimizer = torch.optim.Adam(
-            parameters,
-            lr=base_lr,
-            betas=config.betas)
-    elif config.opt == 'Sgd':
+    if config.opt == "Adam":
+        optimizer = torch.optim.Adam(parameters, lr=base_lr, betas=config.betas)
+    elif config.opt == "Sgd":
         optimizer = torch.optim.SGD(
             parameters,
             lr=base_lr,
             momentum=config.momentum,
-            weight_decay=config.weight_decay)
+            weight_decay=config.weight_decay,
+        )
     else:
         logging.info("Wrong Optimizer Type.")
         sys.exit()
 
     # lr policy ##############################
     total_iteration = config.nepochs * config.niters_per_epoch
-    
-    if config.lr_schedule == 'linear':
-        lr_policy = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=LambdaLR(config.nepochs, 0, config.decay_epoch).step)
-    elif config.lr_schedule == 'exponential':
+
+    if config.lr_schedule == "linear":
+        lr_policy = torch.optim.lr_scheduler.LambdaLR(
+            optimizer, lr_lambda=LambdaLR(config.nepochs, 0, config.decay_epoch).step
+        )
+    elif config.lr_schedule == "exponential":
         lr_policy = torch.optim.lr_scheduler.ExponentialLR(optimizer, config.lr_decay)
-    elif config.lr_schedule == 'multistep':
-        lr_policy = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=config.milestones, gamma=config.gamma)
+    elif config.lr_schedule == "multistep":
+        lr_policy = torch.optim.lr_scheduler.MultiStepLR(
+            optimizer, milestones=config.milestones, gamma=config.gamma
+        )
     else:
         logging.info("Wrong Learning Rate Schedule Type.")
         sys.exit()
 
-
     # data loader ###########################
 
-    transforms_ = [ transforms.RandomCrop(config.image_height),
-                    transforms.RandomHorizontalFlip(),
-                    transforms.ToTensor()]
-    train_loader_model = DataLoader(ImageDataset(config.dataset_path, transforms_=transforms_, unaligned=True, portion=config.train_portion), 
-                        batch_size=config.batch_size, shuffle=True, num_workers=config.num_workers)
-    train_loader_arch = DataLoader(ImageDataset(config.dataset_path, transforms_=transforms_, unaligned=True, portion=config.train_portion-1), 
-                        batch_size=config.batch_size, shuffle=True, num_workers=config.num_workers)
+    transforms_ = [
+        transforms.RandomCrop(config.image_height),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+    ]
+    train_loader_model = DataLoader(
+        ImageDataset(
+            config.dataset_path_train,
+            transforms_=transforms_,
+            unaligned=True,
+            portion=config.train_portion,
+        ),
+        batch_size=config.batch_size,
+        shuffle=True,
+        num_workers=config.num_workers,
+    )
+    train_loader_arch = DataLoader(
+        ImageDataset(
+            config.dataset_path_train,
+            transforms_=transforms_,
+            unaligned=True,
+            portion=config.train_portion - 1,
+        ),
+        batch_size=config.batch_size,
+        shuffle=True,
+        num_workers=config.num_workers,
+    )
 
-    transforms_ = [ transforms.ToTensor()]
-    test_loader = DataLoader(ImageDataset(config.dataset_path, transforms_=transforms_, mode='val'), 
-                        batch_size=1, shuffle=False, num_workers=config.num_workers)
+    transforms_ = [transforms.ToTensor()]
+    test_loader = DataLoader(
+        ImageDataset(config.dataset_path_val, transforms_=transforms_),
+        batch_size=1,
+        shuffle=False,
+        num_workers=config.num_workers,
+    )
 
     tbar = tqdm(range(config.nepochs), ncols=80)
     valid_psnr_history = []
     flops_history = []
     flops_supernet_history = []
 
+    # wandb hooks
+    wandb.config.update(config)
+    wandb.watch(
+        model,
+        log="parameters",
+        log_graph=True,
+    )
 
     for epoch in tbar:
         logging.info(pretrain)
         logging.info(config.save)
-        logging.info("lr: " + str(optimizer.param_groups[0]['lr']))
+        logging.info("lr: " + str(optimizer.param_groups[0]["lr"]))
+        wandb.log(
+            {
+                "lr": optimizer.param_groups[0]["lr"],
+            }
+        )
 
         logging.info("update arch: " + str(update_arch))
 
         # training
         tbar.set_description("[Epoch %d/%d][train...]" % (epoch + 1, config.nepochs))
-        train(pretrain, train_loader_model, train_loader_arch, model, architect, teacher_model, optimizer, lr_policy, logger, epoch, update_arch=update_arch)
+        train(
+            pretrain,
+            train_loader_model,
+            train_loader_arch,
+            model,
+            architect,
+            teacher_model,
+            optimizer,
+            lr_policy,
+            logger,
+            epoch,
+            update_arch=update_arch,
+        )
         torch.cuda.empty_cache()
         lr_policy.step()
 
         # validation
-        if epoch and not (epoch+1) % config.eval_epoch:
-            tbar.set_description("[Epoch %d/%d][validation...]" % (epoch + 1, config.nepochs))
+        if epoch and not (epoch + 1) % config.eval_epoch:
+            tbar.set_description(
+                "[Epoch %d/%d][validation...]" % (epoch + 1, config.nepochs)
+            )
 
-            save(model, os.path.join(config.save, 'weights_%d.pt'%epoch))
+            save(model, os.path.join(config.save, "weights_%d.pt" % epoch))
 
             with torch.no_grad():
-                if pretrain == True:
+                if pretrain is True:
                     model.module.prun_mode = "min"
                     valid_psnr = infer(epoch, model, test_loader, logger)
-                    logger.add_scalar('psnr/val_min', valid_psnr, epoch)
-                    logging.info("Epoch %d: valid_psnr_min %.3f"%(epoch, valid_psnr))
+                    logger.add_scalar("psnr/val_min", valid_psnr, epoch)
+                    wandb.log(
+                        {
+                            "psnr/val_min": valid_psnr,
+                        }
+                    )
+                    logging.info("Epoch %d: valid_psnr_min %.3f" % (epoch, valid_psnr))
 
                     if len(model.module._width_mult_list) > 1:
                         model.module.prun_mode = "max"
                         valid_psnr = infer(epoch, model, test_loader, logger)
-                        logger.add_scalar('psnr/val_max', valid_psnr, epoch)
-                        logging.info("Epoch %d: valid_psnr_max %.3f"%(epoch, valid_psnr))
+                        logger.add_scalar("psnr/val_max", valid_psnr, epoch)
+                        wandb.log(
+                            {
+                                "psnr/val_max": valid_psnr,
+                            }
+                        )
+                        logging.info(
+                            "Epoch %d: valid_psnr_max %.3f" % (epoch, valid_psnr)
+                        )
 
                         model.module.prun_mode = "random"
                         valid_psnr = infer(epoch, model, test_loader, logger)
-                        logger.add_scalar('psnr/val_random', valid_psnr, epoch)
-                        logging.info("Epoch %d: valid_psnr_random %.3f"%(epoch, valid_psnr))
+                        logger.add_scalar("psnr/val_random", valid_psnr, epoch)
+                        wandb.log(
+                            {
+                                "psnr/val_random": valid_psnr,
+                            }
+                        )
+                        logging.info(
+                            "Epoch %d: valid_psnr_random %.3f" % (epoch, valid_psnr)
+                        )
 
                 else:
                     model.module.prun_mode = None
 
-                    valid_psnr, flops = infer(epoch, model, test_loader, logger, finalize=True)
+                    valid_psnr, flops = infer(
+                        epoch, model, test_loader, logger, finalize=True
+                    )
 
-                    logger.add_scalar('psnr/val', valid_psnr, epoch)
-                    logging.info("Epoch %d: valid_psnr %.3f"%(epoch, valid_psnr))
-                    
-                    logger.add_scalar('flops/val', flops, epoch)
-                    logging.info("Epoch %d: flops %.3f"%(epoch, flops))
+                    logger.add_scalar("psnr/val", valid_psnr, epoch)
+                    wandb.log(
+                        {
+                            "psnr/val": valid_psnr,
+                        }
+                    )
+                    logging.info("Epoch %d: valid_psnr %.3f" % (epoch, valid_psnr))
+
+                    logger.add_scalar("flops/val", flops, epoch)
+                    wandb.log(
+                        {
+                            "flops/val": flops,
+                        }
+                    )
+                    logging.info("Epoch %d: flops %.3f" % (epoch, flops))
 
                     valid_psnr_history.append(valid_psnr)
                     flops_history.append(flops)
-                    
+
                     if update_arch:
                         flops_supernet_history.append(architect.flops_supernet)
 
                 if update_arch:
                     state = {}
-                    state['alpha'] = getattr(model.module, 'alpha')
-                    state['beta'] = getattr(model.module, 'beta')
-                    state['ratio'] = getattr(model.module, 'ratio')
+                    state["alpha"] = getattr(model.module, "alpha")
+                    state["beta"] = getattr(model.module, "beta")
+                    state["ratio"] = getattr(model.module, "ratio")
                     state["psnr"] = valid_psnr
                     state["flops"] = flops
 
-                    torch.save(state, os.path.join(config.save, "arch_%d.pt"%(epoch)))
+                    torch.save(state, os.path.join(config.save, "arch_%d.pt" % (epoch)))
 
                     if config.flops_weight > 0:
                         if flops < config.flops_min:
                             architect.flops_weight /= 2
                         elif flops > config.flops_max:
                             architect.flops_weight *= 2
-                        logger.add_scalar("arch/flops_weight", architect.flops_weight, epoch+1)
-                        logging.info("arch_flops_weight = " + str(architect.flops_weight))
+                        logger.add_scalar(
+                            "arch/flops_weight", architect.flops_weight, epoch + 1
+                        )
+                        wandb.log(
+                            {
+                                "arch/flops_weight": architect.flops_weight,
+                            }
+                        )
+                        logging.info(
+                            "arch_flops_weight = " + str(architect.flops_weight)
+                        )
 
-    save(model, os.path.join(config.save, 'weights.pt'))
-    
+    save(model, os.path.join(config.save, "weights.pt"))
+
     if update_arch:
         torch.save(state, os.path.join(config.save, "arch.pt"))
 
 
-def train(pretrain, train_loader_model, train_loader_arch, model, architect, teacher_model, optimizer, lr_policy, logger, epoch, update_arch=True):
+def train(
+    pretrain,
+    train_loader_model,
+    train_loader_arch,
+    model,
+    architect,
+    teacher_model,
+    optimizer,
+    lr_policy,
+    logger,
+    epoch,
+    update_arch=True,
+):
     model.train()
 
-    bar_format = '{desc}[{elapsed}<{remaining},{rate_fmt}]'
-    pbar = tqdm(range(config.niters_per_epoch), file=sys.stdout, bar_format=bar_format, ncols=80)
+    bar_format = "{desc}[{elapsed}<{remaining},{rate_fmt}]"
+    pbar = tqdm(
+        range(config.niters_per_epoch), file=sys.stdout, bar_format=bar_format, ncols=80
+    )
     dataloader_model = iter(train_loader_model)
     dataloader_arch = iter(train_loader_arch)
 
@@ -255,7 +424,7 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, tea
 
         # end = time.time()
 
-        input = minibatch['A']
+        input = minibatch["A"]
         input = input.cuda(non_blocking=True)
         target = teacher_model(input)
 
@@ -266,14 +435,20 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, tea
             pbar.set_description("[Step %d/%d]" % (step + 1, len(train_loader_arch)))
 
             minibatch = dataloader_arch.next()
-            input_search = minibatch['A']
+            input_search = minibatch["A"]
             input_search = input_search.cuda(non_blocking=True)
             target_search = teacher_model(input_search)
 
             loss_arch = architect.step(input, target, input_search, target_search)
-            if (step+1) % 10 == 0:
-                logger.add_scalar('loss_arch/train', loss_arch, epoch*len(pbar)+step)
-                logger.add_scalar('arch/flops_supernet', architect.flops_supernet, epoch*len(pbar)+step)
+            if (step + 1) % 10 == 0:
+                logger.add_scalar(
+                    "loss_arch/train", loss_arch, epoch * len(pbar) + step
+                )
+                logger.add_scalar(
+                    "arch/flops_supernet",
+                    architect.flops_supernet,
+                    epoch * len(pbar) + step,
+                )
 
         # print(model.module.alpha[1])
         # print(model.module.ratio[1])
@@ -284,7 +459,7 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, tea
         # end = time.time()
 
         optimizer.zero_grad()
-        logger.add_scalar('loss/train', loss, epoch*len(pbar)+step)
+        logger.add_scalar("loss/train", loss, epoch * len(pbar) + step)
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
         optimizer.step()
@@ -298,7 +473,8 @@ def train(pretrain, train_loader_model, train_loader_arch, model, architect, tea
 
     torch.cuda.empty_cache()
     del loss
-    if update_arch: del loss_arch
+    if update_arch:
+        del loss_arch
 
 
 def infer(epoch, model, test_loader, logger, finalize=False):
@@ -306,17 +482,29 @@ def infer(epoch, model, test_loader, logger, finalize=False):
 
     for i, batch in enumerate(test_loader):
         # Set model input
-        real_A = Variable(batch['A']).cuda()
+        real_A = Variable(batch["A"]).cuda()
         fake_B = model(real_A).data.float().clamp_(0, 1)
-        
-        img_name = '08%02d_gen.png' % (i+1) if i < 99 else '0900_gen.png'
-        save_image(fake_B, os.path.join('output/B_nasgan', img_name))
 
-    psnr = compute_psnr('output/B_nasgan', config.dataset_path + '/val_hr')
+        img_name = "08%02d_gen.png" % (i + 1) if i < 99 else "0900_gen.png"
+        op_dir = pathlib.Path("output/B_nasgan")
+        op_dir.mkdir(exist_ok=True, parents=True)
+        save_image(fake_B, str(op_dir / img_name))
+
+    psnr = compute_psnr(op_dir, config.dataset_path_val_hr)
 
     if finalize:
-        model_infer = NAS_GAN_Infer(getattr(model.module, 'alpha'), getattr(model.module, 'beta'), getattr(model.module, 'ratio'), num_cell=config.num_cell, op_per_cell=config.op_per_cell, 
-                                    width_mult_list=config.width_mult_list, loss_weight=config.loss_weight, loss_func=config.loss_func, before_act=config.before_act, quantize=config.quantize)
+        model_infer = NAS_GAN_Infer(
+            getattr(model.module, "alpha"),
+            getattr(model.module, "beta"),
+            getattr(model.module, "ratio"),
+            num_cell=config.num_cell,
+            op_per_cell=config.op_per_cell,
+            width_mult_list=config.width_mult_list,
+            loss_weight=config.loss_weight,
+            loss_func=config.loss_func,
+            before_act=config.before_act,
+            quantize=config.quantize,
+        )
         flops = model_infer.forward_flops((3, 510, 350))
         return psnr, flops
 
@@ -324,5 +512,5 @@ def infer(epoch, model, test_loader, logger, finalize=False):
         return psnr
 
 
-if __name__ == '__main__':
-    main(pretrain=config.pretrain) 
+if __name__ == "__main__":
+    main(pretrain=config.pretrain)

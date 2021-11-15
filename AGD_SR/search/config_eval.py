@@ -60,7 +60,10 @@ C.ENABLE_TANH = True
 
 C.generator_A2B = 'ESRGAN/RRDB_ESRGAN_x4.pth'
 
-C.dataset_path = '/home/yf22/dataset/SR/Set5'
+C.dataset_path_train = "./../../dataset/super_resolution/div2k/DIV2K_train_LR_bicubic/X4_sub"
+C.dataset_path_train_hr = "./../../dataset/super_resolution/div2k/DIV2K_train_HR"
+C.dataset_path_val = "./../../dataset/super_resolution/div2k/DIV2K_valid_LR_bicubic/X4"
+C.dataset_path_val_hr = "./../../dataset/super_resolution/div2k/DIV2K_valid_HR"
 
 C.real_measurement = False
 

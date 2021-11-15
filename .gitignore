@@ -1,15 +1,16 @@
 .venv
 .micromamba
-**/__pycache__
-**/ckpt/
-**/.ipynb_checkpoints
-**/.mypy_cache
-**/wandb/
-maestro
-dataset
-AGD_SR/search/ESRGAN/
 .vscode
-AGD_ST/search/output/*
 
-*.tar.gz*
+__pycache__
+.ipynb_checkpoints
+.mypy_cache
+.pytest_cache
+
+**/wandb/
+/maestro
+/dataset
+
+/*.tar.gz*
+
 *_lookup_table.npy
