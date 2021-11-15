@@ -14,6 +14,10 @@ C = edict()
 config = C
 cfg = C
 
+# ==============
+C.recursion = 2
+# ==============
+
 C.seed = 12345
 
 """please config ROOT_dir and user when u first using"""
@@ -39,16 +43,6 @@ C.dataset_path_train = (
 C.dataset_path_train_hr = "./../../dataset/super_resolution/div2k/DIV2K_train_HR"
 C.dataset_path_val = "./../../dataset/super_resolution/div2k/DIV2K_valid_LR_bicubic/X4"
 C.dataset_path_val_hr = "./../../dataset/super_resolution/div2k/DIV2K_valid_HR"
-
-"""Path Config"""
-
-
-def add_path(path):
-    if path not in sys.path:
-        sys.path.insert(0, path)
-
-
-add_path(osp.join(C.root_dir, "furnace"))
 
 """Image Config"""
 
@@ -173,7 +167,7 @@ C.arch_learning_rate = 3e-4
 C.alpha_weight = 2 / 7
 C.ratio_weight = 5 / 7
 C.beta_weight = 0
-C.flops_weight = 0
+C.flops_weight = 0 / C.recursion
 
 C.flops_max = 400e9
 

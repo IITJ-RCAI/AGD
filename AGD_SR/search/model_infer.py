@@ -159,6 +159,7 @@ class NAS_GAN_Infer(nn.Module):
         alpha,
         beta,
         ratio,
+        recursion,
         num_cell=5,
         op_per_cell=5,
         width_mult_list=[
@@ -221,8 +222,7 @@ class NAS_GAN_Infer(nn.Module):
             )
 
         self.trunk_conv = Conv(self.nf, self.nf, 3, 1, 1, bias=True)
-        self.upconv1 = Conv(self.nf, self.nf, 3, 1, 1, bias=True)
-        self.upconv2 = Conv(self.nf, self.nf, 3, 1, 1, bias=True)
+        self.upconv = [Conv(self.nf, self.nf, 3, 1, 1, bias=True) for _ in range(recursion)]
         self.HRconv = Conv(self.nf, self.nf, 3, 1, 1, bias=True)
         self.conv_last = Conv(self.nf, 3, 3, 1, 1, bias=True)
 
@@ -242,12 +242,10 @@ class NAS_GAN_Infer(nn.Module):
 
         out = out + orig
 
-        out = self.lrelu(
-            self.upconv1(F.interpolate(out, scale_factor=2, mode="nearest"))
-        )
-        out = self.lrelu(
-            self.upconv2(F.interpolate(out, scale_factor=2, mode="nearest"))
-        )
+        for c in self.upconv:
+            out = self.lrelu(
+                c(F.interpolate(out, scale_factor=2, mode="nearest"))
+            )
         out = self.conv_last(self.lrelu(self.HRconv(out)))
 
         if ENABLE_TANH:
@@ -269,13 +267,10 @@ class NAS_GAN_Infer(nn.Module):
         flops, size = self.trunk_conv.forward_flops(size)
         flops_total.append(flops)
 
-        size = (size[0], size[1] * 2, size[2] * 2)
-        flops, size = self.upconv1.forward_flops(size)
-        flops_total.append(flops)
-
-        size = (size[0], size[1] * 2, size[2] * 2)
-        flops, size = self.upconv2.forward_flops(size)
-        flops_total.append(flops)
+        for c in self.upconv:
+            size = (size[0], size[1] * 2, size[2] * 2)
+            flops, size = c.forward_flops(size)
+            flops_total.append(flops)
 
         flops, size = self.HRconv.forward_flops(size)
         flops_total.append(flops)

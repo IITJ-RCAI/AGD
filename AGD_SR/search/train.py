@@ -138,6 +138,7 @@ def main():
         state["alpha"],
         state["beta"],
         state["ratio"],
+        config.recursion,
         num_cell=config.num_cell,
         op_per_cell=config.op_per_cell,
         width_mult_list=config.width_mult_list,
@@ -145,6 +146,9 @@ def main():
         loss_func=config.loss_func,
         before_act=config.before_act,
         quantize=config.quantize,
+    )
+    model = nn.Sequential(
+        *(model for _ in range(config.recursion))
     )
     # summary(model.cuda(), (3, 510, 350))
 

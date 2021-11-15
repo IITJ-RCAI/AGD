@@ -78,10 +78,14 @@ def main():
         state["alpha"],
         state["beta"],
         state["ratio"],
+        config.recursion,
         num_cell=config.num_cell,
         op_per_cell=config.op_per_cell,
         width_mult_list=config.width_mult_list,
         quantize=config.quantize,
+    )
+    model = nn.Sequential(
+        *(model for _ in config.recursion)
     )
 
     if not config.real_measurement:

@@ -211,7 +211,7 @@ for seed_idx, rng_seed in enumerate(seeds):
             cfg_train.rename(cfg_train.parent / "config_train.py")
             cfg_train = cfg_train.parent / "config_train.py"
             try:
-                os.system(f"cd AGD_{task}/search && python train_search.py")
+                os.system(f"cd AGD_{task}/search && python train.py")
                 # backup checkpoint
                 if bkup:
                     tar_file = pathlib.Path(f"{run_prefix}_train_finetune_ckpt.tar.gz")

@@ -14,6 +14,10 @@ C = edict()
 config = C
 cfg = C
 
+# ==============
+C.recursion = 2
+# ==============
+
 C.seed = 12345
 
 """please config ROOT_dir and user when u first using"""
@@ -32,16 +36,6 @@ C.val_log_file = C.log_dir + "/val_" + exp_time + ".log"
 C.link_val_log_file = C.log_dir + "/val_last.log"
 
 """Data Dir and Weight Dir"""
-
-"""Path Config"""
-
-
-def add_path(path):
-    if path not in sys.path:
-        sys.path.insert(0, path)
-
-
-add_path(osp.join(C.root_dir, "furnace"))
 
 """Image Config"""
 

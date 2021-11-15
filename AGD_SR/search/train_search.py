@@ -124,6 +124,7 @@ def main(pretrain=True):
 
     # Model #######################################
     model = Network(
+        config.recursion,
         config.num_cell,
         config.op_per_cell,
         slimmable=config.slimmable,
@@ -133,6 +134,9 @@ def main(pretrain=True):
         loss_func=config.loss_func,
         before_act=config.before_act,
         quantize=config.quantize,
+    )
+    model = nn.Sequential(
+        *(model for _ in range(config.recursion))
     )
     # summary(model.cuda(), (3, 510, 350))
     model = torch.nn.DataParallel(model).cuda()
